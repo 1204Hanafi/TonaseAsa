@@ -1,0 +1,34 @@
+{
+  "firestore": {
+    "database": "(default)",
+    "location": "asia-southeast2",
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "database": {
+    "rules": "database.rules.json"
+  },
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "tonase-app",
+          "appId": "1:1017408178301:android:b7ddaced551e8f992e0914",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "tonase-app",
+          "configurations": {
+            "android": "1:1017408178301:android:b7ddaced551e8f992e0914",
+            "ios": "1:1017408178301:ios:3bb75bdbebcb00962e0914",
+            "macos": "1:1017408178301:ios:3bb75bdbebcb00962e0914",
+            "web": "1:1017408178301:web:a297dc68a27141332e0914",
+            "windows": "1:1017408178301:web:0471e60123799a2d2e0914"
+          }
+        }
+      }
+    }
+  }
+}

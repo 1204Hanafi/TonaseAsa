@@ -165,10 +165,10 @@ packages:
     dependency: transitive
     description:
       name: crypto_keys
-      sha256: acc19abf34623d990a0e8aec69463d74a824c31f137128f42e2810befc509ad0
+      sha256: "2ed305a11a3e5d16dd7f489121c956fd19b9816938bb68bc7ed3a379827a304e"
       url: "https://pub.dev"
     source: hosted
-    version: "0.3.0+1"
+    version: "0.3.0+2"
   csslib:
     dependency: transitive
     description:
@@ -201,6 +201,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.11"
+  dio:
+    dependency: transitive
+    description:
+      name: dio
+      sha256: d90ee57923d1828ac14e492ca49440f65477f4bb1263575900be731a3dac66a9
+      url: "https://pub.dev"
+    source: hosted
+    version: "5.9.0"
+  dio_web_adapter:
+    dependency: transitive
+    description:
+      name: dio_web_adapter
+      sha256: "7586e476d70caecaf1686d21eee7247ea43ef5c345eab9e0cc3583ff13378d78"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.1.1"
   equatable:
     dependency: transitive
     description:
@@ -221,10 +237,10 @@ packages:
     dependency: transitive
     description:
       name: expressions
-      sha256: "308a621b602923dd8a0cf3072793b24850d06453eb49c6b698cbda41a282e904"
+      sha256: f3b0e99563a9a1bde1138e728eb722f292cc7d2aec55d28136c49b1a370306c5
       url: "https://pub.dev"
     source: hosted
-    version: "0.2.5+2"
+    version: "0.2.5+3"
   fake_async:
     dependency: transitive
     description:
@@ -253,10 +269,18 @@ packages:
     dependency: "direct main"
     description:
       name: file_picker
-      sha256: e7e16c9d15c36330b94ca0e2ad8cb61f93cd5282d0158c09805aed13b5452f22
+      sha256: f2d9f173c2c14635cc0e9b14c143c49ef30b4934e8d1d274d6206fcb0086a06f
       url: "https://pub.dev"
     source: hosted
-    version: "10.3.2"
+    version: "10.3.3"
+  file_saver:
+    dependency: "direct main"
+    description:
+      name: file_saver
+      sha256: "9d93db09bd4da9e43238f9dd485360fc51a5c138eea5ef5f407ec56e58079ac0"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.1"
   firebase_auth:
     dependency: "direct main"
     description:
@@ -309,10 +333,10 @@ packages:
     dependency: "direct main"
     description:
       name: firebase_dart
-      sha256: "81e66e0e6b33ce0f633920f3ada3299d8c3e487e5ff65a18a9e29937722b3c3a"
+      sha256: ba71940d63956f2aa4a761882d2abe7e822c99ea81780fbe77e99bde3f29a8d8
       url: "https://pub.dev"
     source: hosted
-    version: "1.4.5"
+    version: "1.5.2"
   firebaseapis:
     dependency: transitive
     description:
@@ -491,10 +515,10 @@ packages:
     dependency: transitive
     description:
       name: jose
-      sha256: "7955ec5d131960104e81fbf151abacb9d835c16c9e793ed394b2809f28b2198d"
+      sha256: bd8dd0bee653a78be16f5e2c0387117906f8f5171f7dcc29e3246b6c7cb73918
       url: "https://pub.dev"
     source: hosted
-    version: "0.3.4"
+    version: "0.3.5"
   js:
     dependency: transitive
     description:
@@ -515,10 +539,10 @@ packages:
     dependency: transitive
     description:
       name: leak_tracker
-      sha256: "8dcda04c3fc16c14f48a7bb586d4be1f0d1572731b6d81d51772ef47c02081e0"
+      sha256: "33e2e26bdd85a0112ec15400c8cbffea70d0f9c3407491f672a2fad47915e2de"
       url: "https://pub.dev"
     source: hosted
-    version: "11.0.1"
+    version: "11.0.2"
   leak_tracker_flutter_testing:
     dependency: transitive
     description:
@@ -575,14 +599,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.16.0"
+  mime:
+    dependency: transitive
+    description:
+      name: mime
+      sha256: "41a20518f0cb1256669420fdba0cd90d21561e560ac240f26ef8322e45bb7ed6"
+      url: "https://pub.dev"
+    source: hosted
+    version: "2.0.0"
   openid_client:
     dependency: transitive
     description:
       name: openid_client
-      sha256: "1d39a829dc770947bf8ec8684a3456743ef0205a777371efe16773a44163eb6a"
+      sha256: "9f09d107a8bcb540e0c5d3aa5601440c5eea7043a665dfbf8bcff10383049e03"
       url: "https://pub.dev"
     source: hosted
-    version: "0.4.9"
+    version: "0.4.9+1"
   path:
     dependency: "direct main"
     description:
@@ -715,10 +747,10 @@ packages:
     dependency: transitive
     description:
       name: petitparser
-      sha256: "07c8f0b1913bcde1ff0d26e57ace2f3012ccbf2b204e070290dad3bb22797646"
+      sha256: "1a97266a94f7350d30ae522c0af07890c70b8e62c71e8e3920d1db4d23c057d1"
       url: "https://pub.dev"
     source: hosted
-    version: "6.1.0"
+    version: "7.0.1"
   platform:
     dependency: transitive
     description:
@@ -771,10 +803,10 @@ packages:
     dependency: transitive
     description:
       name: pointycastle
-      sha256: "4be0097fcf3fd3e8449e53730c631200ebc7b88016acecab2b0da2f0149222fe"
+      sha256: "92aa3841d083cc4b0f4709b5c74fd6409a3e6ba833ffc7dc6a8fee096366acf5"
       url: "https://pub.dev"
     source: hosted
-    version: "3.9.1"
+    version: "4.0.0"
   printing:
     dependency: "direct main"
     description:
@@ -1048,10 +1080,10 @@ packages:
     dependency: transitive
     description:
       name: xml
-      sha256: b015a8ad1c488f66851d762d3090a21c600e479dc75e68328c52774040cf9226
+      sha256: "971043b3a0d3da28727e40ed3e0b5d18b742fa5a68665cca88e74b7876d5e025"
       url: "https://pub.dev"
     source: hosted
-    version: "6.5.0"
+    version: "6.6.1"
   yaml:
     dependency: transitive
     description:

@@ -15,7 +15,7 @@ class _AreaPageState extends State<AreaPage> {
   // Data & DataSource
   final List<AreaModel> _areas = [];
   List<AreaModel> _filteredAreas = [];
-  late final AreaDataTableSource _dataSource;
+  AreaDataTableSource? _dataSource;
 
   // State UI
   bool _isLoading = true;
@@ -64,13 +64,13 @@ class _AreaPageState extends State<AreaPage> {
       _filteredAreas = q.isEmpty
           ? List.from(_areas)
           : _areas
-                .where(
-                  (a) =>
-                      a.areaId.contains(q) ||
-                      a.areaName.toLowerCase().contains(q),
-                )
-                .toList();
-      _dataSource.updateData(_filteredAreas);
+              .where(
+                (a) =>
+                    a.areaId.contains(q) ||
+                    a.areaName.toLowerCase().contains(q),
+              )
+              .toList();
+      _dataSource!.updateData(_filteredAreas);
     });
   }
 
@@ -89,7 +89,7 @@ class _AreaPageState extends State<AreaPage> {
         final cmp = getField(a).compareTo(getField(b));
         return _sortAscending ? cmp : -cmp;
       });
-      _dataSource.updateData(_filteredAreas);
+      _dataSource!.updateData(_filteredAreas);
     });
   }
 
@@ -233,10 +233,8 @@ class _AreaPageState extends State<AreaPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Area',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title:
+            const Text('Area', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.teal,
         foregroundColor: Colors.white,
         actions: [
@@ -246,6 +244,14 @@ class _AreaPageState extends State<AreaPage> {
           ),
         ],
       ),
+      floatingActionButton: MediaQuery.of(context).size.width <= 720
+          ? FloatingActionButton(
+              onPressed: () => _showAddEditDialog(),
+              backgroundColor: Colors.teal,
+              tooltip: 'Tambah Area',
+              child: const Icon(Icons.add, color: Colors.white),
+            )
+          : null,
       body: Column(
         children: [
           Padding(
@@ -272,84 +278,156 @@ class _AreaPageState extends State<AreaPage> {
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : SingleChildScrollView(
-                    child: PaginatedDataTable(
-                      header: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Daftar Area',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          ElevatedButton.icon(
-                            key: Key('add-area-button'),
-                            onPressed: () => _showAddEditDialog(),
-                            icon: const Icon(Icons.add),
-                            label: const Text('Tambah Area'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.teal,
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                            ),
-                          ),
-                        ],
-                      ),
-                      headingRowColor: WidgetStateProperty.all<Color>(
-                        Colors.teal,
-                      ),
-                      columns: [
-                        const DataColumn(
-                          label: Text(
-                            'No',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        DataColumn(
-                          label: const Text(
-                            'ID',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          onSort: (ci, _) => _onSort((a) => a.areaId, ci),
-                        ),
-                        DataColumn(
-                          label: const Text(
-                            'Nama',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          onSort: (ci, _) => _onSort((a) => a.areaName, ci),
-                        ),
-                        const DataColumn(
-                          label: Text(
-                            'Aksi',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                      source: _dataSource,
-                      rowsPerPage: 10,
-                      columnSpacing: 20,
-                      sortColumnIndex: _sortColumnIndex,
-                      sortAscending: _sortAscending,
-                      showFirstLastButtons: true,
-                    ),
-                  ),
+                : _buildResponsiveDataTable(),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildResponsiveDataTable() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth > 720) {
+          return _buildDesktopDataTable();
+        } else {
+          return _buildMobileListView();
+        }
+      },
+    );
+  }
+
+  Widget _buildMobileListView() {
+    return ListView.builder(
+      itemCount: _filteredAreas.length,
+      itemBuilder: (context, index) {
+        final area = _filteredAreas[index];
+        return Card(
+            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
+                child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: Colors.teal[100],
+                        child: Text('${index + 1}',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.teal,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            Text('${[area.areaId]} ${area.areaName}',
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.bold)),
+                          ])),
+                      PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (value == 'edit') {
+                            _onEditArea(area);
+                          } else if (value == 'delete') {
+                            _onDeleteArea(area.areaId);
+                          }
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                              value: 'edit',
+                              child: Row(children: [
+                                Icon(Icons.edit, color: Colors.blue),
+                                SizedBox(width: 8),
+                                Text('Edit')
+                              ])),
+                          PopupMenuItem(
+                              value: 'delete',
+                              child: Row(children: [
+                                Icon(Icons.delete, color: Colors.red),
+                                SizedBox(width: 8),
+                                Text('Delete')
+                              ])),
+                        ],
+                      ),
+                    ])));
+      },
+    );
+  }
+
+  Widget _buildDesktopDataTable() {
+    final minTableWidth = 900.0;
+    final defaultRowsPerPage = 10;
+    final availableRows = (_dataSource?.rowCount ?? 0);
+    final rowsPerPage = availableRows > defaultRowsPerPage
+        ? defaultRowsPerPage
+        : (availableRows == 0 ? 1 : availableRows);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth > minTableWidth
+            ? constraints.maxWidth
+            : minTableWidth;
+
+        return SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: tableWidth,
+              child: PaginatedDataTable(
+                header: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Daftar Area',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    ElevatedButton.icon(
+                      onPressed: () => _showAddEditDialog(),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Tambah Area'),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal,
+                          foregroundColor: Colors.white),
+                    ),
+                  ],
+                ),
+                columns: [
+                  _buildDataColumn('No'),
+                  _buildDataColumn('ID',
+                      onSort: (ci, _) => _onSort((a) => a.areaId, ci)),
+                  _buildDataColumn('Nama',
+                      onSort: (ci, _) => _onSort((a) => a.areaName, ci)),
+                  _buildDataColumn('Aksi'),
+                ],
+                source: _dataSource!,
+                rowsPerPage: rowsPerPage,
+                sortColumnIndex: _sortColumnIndex,
+                sortAscending: _sortAscending,
+                showFirstLastButtons: true,
+                headingRowColor: WidgetStateProperty.all<Color>(Colors.teal),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  DataColumn _buildDataColumn(String label, {Function(int, bool)? onSort}) {
+    return DataColumn(
+      onSort: onSort,
+      label: Expanded(
+        child: Center(
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+        ),
       ),
     );
   }

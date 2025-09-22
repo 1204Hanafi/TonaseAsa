@@ -215,7 +215,7 @@ class _HomePageState extends State<HomePage> {
               const SizedBox(height: 2),
               _buildLabelText('Kota:', item.custCity),
               const SizedBox(height: 2),
-              _buildLabelText('No. SJ:', item.noSj),
+              _buildLabelText('No. PK:', item.noSj),
               const SizedBox(height: 2),
               _buildLabelText('Total Tonase:', item.totalTonase.toString()),
               const SizedBox(height: 8),
@@ -248,7 +248,7 @@ class _HomePageState extends State<HomePage> {
           TextButton(
             key: const Key('close-viewDetails'),
             onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+            child: const Text('Tutup'),
           ),
         ],
       ),
@@ -334,7 +334,7 @@ class _HomePageState extends State<HomePage> {
             Expanded(
               child: _isLoadingTonase
                   ? const Center(child: CircularProgressIndicator())
-                  : _buildResponsiveDataTable(), // Ganti _buildTable dengan ini
+                  : _buildResponsiveDataTable(),
             ),
           ],
         ),
@@ -446,7 +446,6 @@ class _HomePageState extends State<HomePage> {
   Widget _buildResponsiveDataTable() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Tentukan breakpoint, misalnya 720 piksel
         if (constraints.maxWidth > 720) {
           return _buildDesktopDataTable(); // Tampilan desktop
         } else {
@@ -489,12 +488,13 @@ class _HomePageState extends State<HomePage> {
                       return Card(
                         margin: const EdgeInsets.symmetric(
                             horizontal: 4, vertical: 4),
-                        color: isSelected ? Colors.teal : null,
+                        color: isSelected ? Colors.teal[300] : null,
                         child: InkWell(
                           onTap: () {
                             _dataSource?.toggleSelection(item);
                             setState(() {});
                           },
+                          onLongPress: () => _onViewDetails(item),
                           child: Padding(
                             padding: const EdgeInsets.all(12.0),
                             child: Column(
@@ -659,131 +659,108 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // Widget DataTable yang sudah ada, dipindahkan ke sini
+  DataColumn _buildDataColumn(String label, {bool numeric = false}) {
+    return DataColumn(
+      numeric: numeric,
+      label: Expanded(
+        child: Center(
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildDesktopDataTable() {
     final minTableWidth = 900.0;
-    final maxTableWidth = 1200.0;
     final defaultRowsPerPage = 10;
     final availableRows = (_dataSource?.rowCount ?? 0);
     final rowsPerPage = availableRows > defaultRowsPerPage
         ? defaultRowsPerPage
         : (availableRows == 0 ? 1 : availableRows);
 
+    // Menggunakan LayoutBuilder untuk mendapatkan lebar layar
     return LayoutBuilder(
       builder: (context, constraints) {
-        final tableWidth = constraints.maxWidth < maxTableWidth
+        final tableWidth = constraints.maxWidth > minTableWidth
             ? constraints.maxWidth
-            : maxTableWidth;
+            : minTableWidth;
 
-        return Center(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minWidth: minTableWidth,
-                maxWidth: tableWidth,
-              ),
-              child: SingleChildScrollView(
-                child: PaginatedDataTable(
-                  key: const Key('home-data-table'),
-                  header: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Data Tonase',
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      SizedBox(
-                        width: 220,
-                        child: TextField(
-                          key: const Key('search-field'),
-                          controller: _searchController,
-                          decoration: InputDecoration(
-                            hintText: 'Search',
-                            prefixIcon: const Icon(Icons.search),
-                            suffixIcon: IconButton(
-                              key: const Key('clear-search'),
-                              icon: const Icon(Icons.clear),
-                              onPressed: () {
-                                _searchController.clear();
-                                _applyFilters();
-                              },
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            isDense: true,
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: 8,
-                              horizontal: 12,
-                            ),
-                          ),
-                          onChanged: (_) => _applyFilters(),
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: tableWidth, // Terapkan lebar responsif di sini
+            child: PaginatedDataTable(
+              key: const Key('home-data-table'),
+              header: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Data Tonase',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(
+                    width: 220,
+                    child: TextField(
+                      key: const Key('search-field'),
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        hintText: 'Search',
+                        prefixIcon: const Icon(Icons.search),
+                        suffixIcon: IconButton(
+                          key: const Key('clear-search'),
+                          icon: const Icon(Icons.clear),
+                          onPressed: () {
+                            _searchController.clear();
+                            _applyFilters();
+                          },
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 8,
+                          horizontal: 12,
                         ),
                       ),
-                    ],
+                      onChanged: (_) => _applyFilters(),
+                    ),
                   ),
-                  showCheckboxColumn: true,
-                  onSelectAll: (all) {
-                    if (all == null) return;
-                    setState(() => all
-                        ? _dataSource!.selectAll()
-                        : _dataSource!.clearSelection());
-                  },
-                  headingRowColor: WidgetStateProperty.all<Color>(Colors.teal),
-                  columns: const [
-                    DataColumn(
-                        label: Text('Tanggal',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white))),
-                    DataColumn(
-                        label: Text('Toko',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white))),
-                    DataColumn(
-                        label: Text('No. SJ',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white))),
-                    DataColumn(
-                        label: Text('Area',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white))),
-                    DataColumn(
-                        numeric: true,
-                        label: Text('Koli',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white))),
-                    DataColumn(
-                        numeric: true,
-                        label: Text('Tonase',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white))),
-                    DataColumn(
-                        label: Text('Aksi',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white))),
-                  ],
-                  source: _dataSource ??
-                      TonaseDataTableSource(
-                        tonaseList: [],
-                        onEdit: _onEdit,
-                        onDelete: _onDeleteConfirm,
-                        onViewDetail: _onViewDetails,
-                      ),
-                  rowsPerPage: rowsPerPage,
-                  showFirstLastButtons: true,
-                  columnSpacing: 20,
-                  horizontalMargin: 16,
-                ),
+                ],
               ),
+              showCheckboxColumn: true,
+              onSelectAll: (all) {
+                if (all == null) return;
+                setState(() => all
+                    ? _dataSource!.selectAll()
+                    : _dataSource!.clearSelection());
+              },
+              headingRowColor: WidgetStateProperty.all<Color>(Colors.teal),
+              columns: [
+                _buildDataColumn('Tanggal'),
+                _buildDataColumn('Toko'),
+                _buildDataColumn('No. PK'),
+                _buildDataColumn('Area'),
+                _buildDataColumn('Koli', numeric: true),
+                _buildDataColumn('Tonase', numeric: true),
+                _buildDataColumn('Aksi'),
+              ],
+              source: _dataSource ??
+                  TonaseDataTableSource(
+                    tonaseList: [],
+                    onEdit: _onEdit,
+                    onDelete: _onDeleteConfirm,
+                    onViewDetail: _onViewDetails,
+                  ),
+              rowsPerPage: rowsPerPage,
+              showFirstLastButtons: true,
+              columnSpacing: 20,
+              horizontalMargin: 16,
             ),
           ),
         );
@@ -996,8 +973,9 @@ class TonaseDataTableSource extends DataTableSource {
             ),
           ),
         ),
-        DataCell(
-            Text(e.noSj, style: const TextStyle(fontWeight: FontWeight.bold))),
+        DataCell(Center(
+            child: Text(e.noSj,
+                style: const TextStyle(fontWeight: FontWeight.bold)))),
         DataCell(
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,

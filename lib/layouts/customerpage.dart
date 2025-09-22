@@ -1,14 +1,18 @@
-import 'dart:io';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
-import 'package:file_picker/file_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:csv/csv.dart';
+// Salin dan ganti seluruh isi file lib/layouts/customerpage.dart
 
-import '../models/customer_model.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:csv/csv.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:file_saver/file_saver.dart';
+import 'package:flutter/material.dart';
+
 import '../models/area_model.dart';
-import '../services/customer_service.dart';
+import '../models/customer_model.dart';
 import '../services/area_service.dart';
+import '../services/customer_service.dart';
 
 class CustomerPage extends StatefulWidget {
   const CustomerPage({super.key});
@@ -21,19 +25,14 @@ class _CustomerPageState extends State<CustomerPage> {
   final CustomerService _customerService = CustomerService();
   final AreaService _areaService = AreaService();
 
-  //Data
   final List<CustomerModel> _customers = [];
   List<CustomerModel> _filteredCustomers = [];
+  CustomerDataTableSource? _dataSource;
 
-  //DataTableSource
-  late final CustomerDataTableSource _dataSource;
-
-  //UI State
   bool _isLoading = true;
   int? _sortColumnIndex;
   bool _sortAscending = true;
 
-  //Controllers
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -56,7 +55,6 @@ class _CustomerPageState extends State<CustomerPage> {
   Future<void> _loadCustomers() async {
     setState(() => _isLoading = true);
     try {
-      // 1. Panggil service secara paralel
       final results = await Future.wait([
         _customerService.getCustomers(),
         _areaService.getAreas(),
@@ -64,31 +62,27 @@ class _CustomerPageState extends State<CustomerPage> {
       final customerList = results[0] as List<CustomerModel>;
       final areaList = results[1] as List<AreaModel>;
 
-      // 2. Pastikan widget masih mounted sebelum lanjut
       if (!mounted) return;
 
-      // 3. Buat lookup map areaRef → areaName
       final areaMap = {
         for (var area in areaList) area.reference: area.areaName,
       };
 
-      // 4. Isi areaName untuk setiap customer
       for (var customer in customerList) {
         customer.areaName = areaMap[customer.areaRef] ?? 'Unknown';
       }
 
-      // 5. Update state
       setState(() {
         _customers
           ..clear()
           ..addAll(customerList);
-        _applyFilter('');
+        _applyFilter(_searchController.text);
       });
     } catch (e) {
       if (!mounted) return;
       _showError('Gagal memuat: ${e.toString()}');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -103,7 +97,7 @@ class _CustomerPageState extends State<CustomerPage> {
                   c.custCity.toLowerCase().contains(query) ||
                   c.areaName.toLowerCase().contains(query);
             }).toList();
-      _dataSource.updateData(_filteredCustomers);
+      _dataSource!.updateData(_filteredCustomers);
     });
   }
 
@@ -122,7 +116,7 @@ class _CustomerPageState extends State<CustomerPage> {
         final cmp = getField(a).compareTo(getField(b));
         return _sortAscending ? cmp : -cmp;
       });
-      _dataSource.updateData(_filteredCustomers);
+      _dataSource!.updateData(_filteredCustomers);
     });
   }
 
@@ -131,76 +125,31 @@ class _CustomerPageState extends State<CustomerPage> {
   }
 
   Future<void> _onDeleteConfirm(String custId) async {
-    final originalCustomer = _customers.firstWhere((c) => c.custId == custId);
-    bool isDeleting = false;
-
     final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
               title: const Text('Konfirmasi Hapus'),
               content: const Text('Yakin ingin menghapus customer ini?'),
               actions: [
-                if (!isDeleting)
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Batal'),
-                  ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Batal'),
+                ),
                 ElevatedButton(
-                  key: Key('confirm-delete-button'),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-
-                  onPressed: isDeleting
-                      ? null
-                      : () async {
-                          setState(() => isDeleting = true);
-                          Navigator.pop(ctx, true);
-                        },
-                  child: isDeleting
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 3,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Text(
-                          'Hapus',
-                          style: TextStyle(color: Colors.white),
-                        ),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Hapus',
+                      style: TextStyle(color: Colors.white)),
                 ),
               ],
-            );
-          },
-        );
-      },
-    );
+            ));
 
     if (confirmed == true) {
       try {
-        _showMessage(
-          'Menghapus customer...',
-          duration: const Duration(seconds: 10),
-        );
-
-        setState(() {
-          _customers.removeWhere((c) => c.custId == custId);
-          _applyFilter(_searchController.text);
-        });
-
         await _customerService.deleteCustomer(custId);
-
-        if (!mounted) return;
         _showMessage('Berhasil dihapus');
+        await _loadCustomers();
       } catch (e) {
-        setState(() {
-          _customers.add(originalCustomer);
-        });
-
-        if (!mounted) return;
         _showError('Gagal Hapus: ${e.toString()}');
       }
     }
@@ -213,22 +162,12 @@ class _CustomerPageState extends State<CustomerPage> {
     final nameCtrl = TextEditingController(text: customer?.custName);
     final cityCtrl = TextEditingController(text: customer?.custCity);
     DocumentReference? areaRef = customer?.areaRef;
-    bool isSaving = false;
 
     final areasFuture = _areaService.getAreas();
-    CustomerModel? originalCustomer;
-    if (isEdit) {
-      originalCustomer = _customers.firstWhere(
-        (c) => c.custId == customer.custId,
-      );
-    }
 
     final saved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
               title: Text(isEdit ? 'Edit Customer' : 'Tambah Customer'),
               content: Form(
                 key: formKey,
@@ -237,32 +176,26 @@ class _CustomerPageState extends State<CustomerPage> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       TextFormField(
-                        key: Key('customer-id-field'),
                         controller: idCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Customer ID',
-                        ),
+                        decoration:
+                            const InputDecoration(labelText: 'Customer ID'),
                         enabled: !isEdit,
                         validator: (v) =>
                             (v == null || v.isEmpty) ? 'Wajib Diisi' : null,
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
-                        key: Key('customer-name-field'),
                         controller: nameCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Customer Name',
-                        ),
+                        decoration:
+                            const InputDecoration(labelText: 'Customer Name'),
                         validator: (v) =>
                             (v == null || v.isEmpty) ? 'Wajib Diisi' : null,
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
-                        key: Key('customer-city-field'),
                         controller: cityCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Customer City',
-                        ),
+                        decoration:
+                            const InputDecoration(labelText: 'Customer City'),
                         validator: (v) =>
                             (v == null || v.isEmpty) ? 'Wajib Diisi' : null,
                       ),
@@ -270,26 +203,28 @@ class _CustomerPageState extends State<CustomerPage> {
                       FutureBuilder<List<AreaModel>>(
                         future: areasFuture,
                         builder: (ctx2, snap) {
-                          if (!snap.hasData) {
+                          if (snap.connectionState == ConnectionState.waiting) {
                             return const Center(
-                              child: CircularProgressIndicator(),
-                            );
+                                child: CircularProgressIndicator());
+                          }
+                          if (!snap.hasData || snap.data!.isEmpty) {
+                            return const Text('Area tidak ditemukan');
                           }
                           final list = snap.data!;
+                          // Pastikan areaRef yang ada valid
+                          if (areaRef != null &&
+                              !list.any((a) => a.reference == areaRef)) {
+                            areaRef = null;
+                          }
                           return DropdownButtonFormField<DocumentReference>(
-                            key: Key('dropdown-area'),
                             initialValue: areaRef,
-                            decoration: const InputDecoration(
-                              labelText: 'Area',
-                            ),
+                            decoration:
+                                const InputDecoration(labelText: 'Area'),
                             items: list
-                                .map(
-                                  (area) => DropdownMenuItem(
-                                    key: Key('dropdown area'),
-                                    value: area.reference,
-                                    child: Text(area.areaName),
-                                  ),
-                                )
+                                .map((area) => DropdownMenuItem(
+                                      value: area.reference,
+                                      child: Text(area.areaName),
+                                    ))
                                 .toList(),
                             validator: (v) => v == null ? 'Pilih Area' : null,
                             onChanged: (v) => areaRef = v,
@@ -301,34 +236,20 @@ class _CustomerPageState extends State<CustomerPage> {
                 ),
               ),
               actions: [
-                if (!isSaving)
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('Batal'),
-                  ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Batal'),
+                ),
                 ElevatedButton(
-                  key: Key('save-customer-button'),
-                  onPressed: isSaving
-                      ? null
-                      : () {
-                          if (formKey.currentState!.validate()) {
-                            Navigator.pop(ctx, true);
-                          }
-                        },
-                  child: isSaving
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 3),
-                        )
-                      : const Text('Simpan'),
+                  onPressed: () {
+                    if (formKey.currentState!.validate()) {
+                      Navigator.pop(ctx, true);
+                    }
+                  },
+                  child: const Text('Simpan'),
                 ),
               ],
-            );
-          },
-        );
-      },
-    );
+            ));
 
     if (saved == true) {
       final cust = CustomerModel(
@@ -338,87 +259,39 @@ class _CustomerPageState extends State<CustomerPage> {
         areaRef: areaRef!,
       );
       try {
-        _showMessage(
-          'Memproses data customer....',
-          duration: const Duration(seconds: 10),
-        );
-
-        final index = _customers.indexWhere((c) => c.custId == cust.custId);
-        setState(() {
-          if (index != -1) {
-            // Edit existing
-            _customers[index] = cust;
-          } else {
-            // Add new
-            _customers.insert(0, cust);
-          }
-          _applyFilter(_searchController.text);
-        });
-
         if (isEdit) {
           await _customerService.updateCustomer(cust.custId, cust);
         } else {
           await _customerService.addCustomer(cust);
         }
-
+        await _loadCustomers();
         if (!mounted) return;
         _showMessage(isEdit ? 'Berhasil diperbarui' : 'Berhasil ditambahkan');
       } catch (e) {
-        setState(() {
-          if (isEdit && originalCustomer != null) {
-            final rollbackIndex = _customers.indexWhere(
-              (c) => c.custId == cust.custId,
-            );
-            if (rollbackIndex != -1) {
-              _customers[rollbackIndex] = originalCustomer;
-            }
-          } else {
-            _customers.removeWhere((c) => c.custId == cust.custId);
-          }
-          _applyFilter(_searchController.text);
-        });
-
         if (!mounted) return;
-        _showError('Gagal Menyimpan: ${e.toString()}');
-      } finally {
-        isSaving = false;
+        _showError(
+            'Gagal Menyimpan: ${e.toString().replaceFirst('Exception: ', '')}');
       }
     }
-
-    idCtrl.dispose();
-    nameCtrl.dispose();
-    cityCtrl.dispose();
   }
 
   Future<void> _downloadTemplate() async {
     try {
-      // 1. Buat konten CSV
       final List<List<String>> csvData = [
-        ['custId', 'custName', 'custCity', 'areaId'], // Header
-        ['', '', '', ''], // Contoh baris kosong
+        ['custId', 'custName', 'custCity', 'areaId'],
       ];
-
       final String csvContent = const ListToCsvConverter().convert(csvData);
+      final Uint8List bytes = Uint8List.fromList(utf8.encode(csvContent));
 
-      final status = await Permission.manageExternalStorage.request();
-      if (!status.isGranted) {
-        _showMessage('Izin penyimpanan diperlukan');
-        return;
-      }
+      await FileSaver.instance.saveFile(
+        name: 'customer_template.csv',
+        bytes: bytes,
+        mimeType: MimeType.text,
+      );
 
-      final directory = Directory('/storage/emulated/0/Download');
-      if (!await directory.exists()) {
-        await directory.create(recursive: true);
-      }
-
-      final filePath = '${directory.path}/customer_template.csv';
-      final file = File(filePath);
-
-      await file.writeAsString(csvContent);
-
-      _showMessage('Template berhasil disimpan di:\n${file.path}');
+      _showMessage('Template berhasil diekspor.');
     } catch (e) {
-      _showMessage('Gagal menyimpan template: ${e.toString()}');
+      _showError('Gagal menyimpan template: ${e.toString()}');
     }
   }
 
@@ -427,102 +300,101 @@ class _CustomerPageState extends State<CustomerPage> {
       type: FileType.custom,
       allowedExtensions: ['csv'],
     );
-    if (result == null) return;
-    final file = File(result.files.single.path!);
-    final content = await file.readAsString();
-    final rows = const CsvToListConverter().convert(content, eol: '\n');
-    if (rows.isEmpty || rows.first.length != 4) {
-      _showError('Format CSV Tidak Valid');
+    if (result == null || result.files.single.path == null) {
+      _showMessage('Tidak ada file yang dipilih.');
       return;
     }
     setState(() => _isLoading = true);
     try {
-      //skip header
-      for (var i = 1; i < rows.length; i++) {
-        final r = rows[i];
-        final area = (await _areaService.getAreas())
-            .firstWhere(
-              (a) => a.areaId == r[3].toString(),
-              orElse: () => AreaModel(areaId: '', areaName: ''),
-            )
-            .reference;
-        await _customerService.addCustomer(
-          CustomerModel(
-            custId: r[0].toString(),
-            custName: r[1].toString(),
-            custCity: r[2].toString(),
-            areaRef: area!,
-          ),
-        );
+      final file = File(result.files.single.path!);
+      final content = await file.readAsString();
+      final List<List<dynamic>> rows =
+          const CsvToListConverter().convert(content);
+
+      if (rows.length < 2) {
+        throw Exception('File CSV kosong atau hanya berisi header.');
       }
+
+      final areas = await _areaService.getAreas();
+      final areaMap = {for (var area in areas) area.areaId: area.reference};
+
+      for (var i = 1; i < rows.length; i++) {
+        final row = rows[i];
+        final areaRef = areaMap[row[3].toString().trim()];
+        if (areaRef != null) {
+          final newCustomer = CustomerModel(
+            custId: row[0].toString().trim(),
+            custName: row[1].toString().trim(),
+            custCity: row[2].toString().trim(),
+            areaRef: areaRef,
+          );
+          await _customerService.addCustomer(newCustomer);
+        }
+      }
+
       if (!mounted) return;
-      _showMessage('Import Berhasil');
+      _showMessage('Proses impor selesai.');
       await _loadCustomers();
     } catch (e) {
-      if (!mounted) return;
-      _showError('Gagal Import: ${e.toString()}');
+      _showError('Gagal memproses file CSV: ${e.toString()}');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _showError(String msg) => ScaffoldMessenger.of(
-    context,
-  ).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+  void _showError(String msg) => ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
 
-  void _showMessage(
-    String msg, {
-    Duration duration = const Duration(seconds: 2),
-  }) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(msg), duration: duration));
-  }
+  void _showMessage(String msg,
+          {Duration duration = const Duration(seconds: 2)}) =>
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(msg), duration: duration));
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Customers',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Customers',
+            style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.teal,
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            icon: const Icon(
-              Icons.download,
-              semanticLabel: 'Download Template',
-            ),
-            onPressed: _downloadTemplate,
-          ),
+              icon: const Icon(Icons.download),
+              tooltip: 'Download Template',
+              onPressed: _downloadTemplate),
           IconButton(
-            icon: const Icon(Icons.upload_file, semanticLabel: 'Import CSV'),
-            onPressed: _importCSV,
-          ),
+              icon: const Icon(Icons.upload_file),
+              tooltip: 'Import CSV',
+              onPressed: _importCSV),
           IconButton(
-            key: Key('refresh-button'),
-            icon: const Icon(Icons.refresh, semanticLabel: 'Muat Ulang'),
-            onPressed: _loadCustomers,
-          ),
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Muat Ulang',
+              onPressed: _loadCustomers),
         ],
       ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(10),
-            child: TextField(
+      floatingActionButton: MediaQuery.of(context).size.width <= 720
+          ? FloatingActionButton(
+              onPressed: () => _showAddEditDialog(),
+              backgroundColor: Colors.teal,
+              tooltip: 'Tambah Customer',
+              child: const Icon(Icons.add, color: Colors.white),
+            )
+          : null,
+      body: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          children: [
+            TextField(
               controller: _searchController,
               onChanged: _applyFilter,
               decoration: InputDecoration(
                 hintText: 'Cari ID, Nama, Kota, Area...',
-                prefixIcon: const Icon(Icons.search, semanticLabel: 'Cari'),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                prefixIcon: const Icon(Icons.search),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 suffixIcon: IconButton(
-                  icon: const Icon(Icons.clear, semanticLabel: 'Bersihkan'),
+                  icon: const Icon(Icons.clear),
                   onPressed: () {
                     _searchController.clear();
                     _applyFilter('');
@@ -530,110 +402,183 @@ class _CustomerPageState extends State<CustomerPage> {
                 ),
               ),
             ),
-          ),
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : SingleChildScrollView(
-                    child: PaginatedDataTable(
-                      header: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Daftar Customer',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          ElevatedButton.icon(
-                            key: Key('add-customer-button'),
-                            onPressed: () => _showAddEditDialog(),
-                            icon: const Icon(Icons.add),
-                            label: const Text('Tambah Customer'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.teal,
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                            ),
-                          ),
-                        ],
-                      ),
-                      headingRowColor: WidgetStateProperty.all<Color>(
-                        Colors.teal,
-                      ),
-                      columns: [
-                        const DataColumn(
-                          label: Text(
-                            'No',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        DataColumn(
-                          label: const Text(
-                            'ID',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          onSort: (ci, _) => _onSort((c) => c.custId, ci),
-                        ),
-                        DataColumn(
-                          label: const Text(
-                            'Nama',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          onSort: (ci, _) => _onSort((c) => c.custName, ci),
-                        ),
-                        DataColumn(
-                          label: const Text(
-                            'Kota',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          onSort: (ci, _) => _onSort((c) => c.custCity, ci),
-                        ),
-                        DataColumn(
-                          label: const Text(
-                            'Area',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                          onSort: (ci, _) => _onSort((c) => c.areaName, ci),
-                        ),
-                        const DataColumn(
-                          label: Text(
-                            'Aksi',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                      source: _dataSource,
-                      rowsPerPage: 10,
-                      columnSpacing: 20,
-                      sortColumnIndex: _sortColumnIndex,
-                      sortAscending: _sortAscending,
-                      showFirstLastButtons: true,
-                    ),
-                  ),
-          ),
-        ],
+            const SizedBox(height: 10),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _buildResponsiveDataTable(),
+            )
+          ],
+        ),
       ),
     );
+  }
+
+  Widget _buildResponsiveDataTable() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth > 720) {
+          return _buildDesktopDataTable();
+        } else {
+          return _buildMobileListView();
+        }
+      },
+    );
+  }
+
+  Widget _buildMobileListView() {
+    return ListView.builder(
+      itemCount: _filteredCustomers.length,
+      itemBuilder: (context, index) {
+        final c = _filteredCustomers[index];
+        return Card(
+            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    CircleAvatar(
+                        backgroundColor: Colors.teal[100],
+                        child: Text('${index + 1}',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                color: Colors.teal,
+                                fontWeight: FontWeight.bold))),
+                    const SizedBox(width: 16),
+                    Expanded(
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          Text('${[c.custId]} ${c.custName}',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 2),
+                          RichText(
+                            text: TextSpan(
+                              style: DefaultTextStyle.of(context)
+                                  .style
+                                  .copyWith(color: Colors.black54),
+                              children: <TextSpan>[
+                                const TextSpan(
+                                    text: 'Kota: ',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.bold)),
+                                TextSpan(text: '${c.custCity}\n'),
+                                const TextSpan(
+                                    text: 'Area: ',
+                                    style:
+                                        TextStyle(fontWeight: FontWeight.bold)),
+                                TextSpan(
+                                    text: '${[c.areaRef.id]} ${c.areaName}'),
+                              ],
+                            ),
+                          )
+                        ])),
+                    PopupMenuButton<String>(
+                      onSelected: (value) {
+                        if (value == 'edit') {
+                          _onEdit(c);
+                        } else if (value == 'delete') {
+                          _onDeleteConfirm(c.custId);
+                        }
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                            value: 'edit',
+                            child: Row(children: [
+                              Icon(Icons.edit, color: Colors.blue),
+                              SizedBox(width: 8),
+                              Text('Edit')
+                            ])),
+                        PopupMenuItem(
+                            value: 'delete',
+                            child: Row(children: [
+                              Icon(Icons.delete, color: Colors.red),
+                              SizedBox(width: 8),
+                              Text('Delete')
+                            ])),
+                      ],
+                    ),
+                  ],
+                )));
+      },
+    );
+  }
+
+  Widget _buildDesktopDataTable() {
+    final minTableWidth = 900.0;
+    final defaultRowsPerPage = 10;
+    final availableRows = (_dataSource?.rowCount ?? 0);
+    final rowsPerPage = availableRows > defaultRowsPerPage
+        ? defaultRowsPerPage
+        : (availableRows == 0 ? 1 : availableRows);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth > minTableWidth
+            ? constraints.maxWidth
+            : minTableWidth;
+
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: tableWidth,
+            child: PaginatedDataTable(
+              header: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Daftar Customer',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  ElevatedButton.icon(
+                    onPressed: () => _showAddEditDialog(),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Tambah Customer'),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal,
+                        foregroundColor: Colors.white),
+                  ),
+                ],
+              ),
+              columns: [
+                _buildDataColumn('No'),
+                _buildDataColumn('ID',
+                    onSort: (ci, _) => _onSort((c) => c.custId, ci)),
+                _buildDataColumn('Nama',
+                    onSort: (ci, _) => _onSort((c) => c.custName, ci)),
+                _buildDataColumn('Kota',
+                    onSort: (ci, _) => _onSort((c) => c.custCity, ci)),
+                _buildDataColumn('Area',
+                    onSort: (ci, _) => _onSort((c) => c.areaName, ci)),
+                _buildDataColumn('Aksi'),
+              ],
+              source: _dataSource!,
+              rowsPerPage: rowsPerPage,
+              sortColumnIndex: _sortColumnIndex,
+              sortAscending: _sortAscending,
+              showFirstLastButtons: true,
+              columnSpacing: 20,
+              horizontalMargin: 16,
+              headingRowColor: WidgetStateProperty.all<Color>(Colors.teal),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  DataColumn _buildDataColumn(String label, {Function(int, bool)? onSort}) {
+    return DataColumn(
+        onSort: onSort,
+        label: Expanded(
+            child: Center(
+          child: Text(label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                  fontWeight: FontWeight.bold, color: Colors.white)),
+        )));
   }
 }
 
@@ -656,62 +601,48 @@ class CustomerDataTableSource extends DataTableSource {
   @override
   DataRow getRow(int index) {
     final c = customers[index];
-    return DataRow(
-      cells: [
-        DataCell(Center(child: Text('${index + 1}'))),
-        DataCell(Text(c.custId)),
-        DataCell(Text(c.custName)),
-        DataCell(Text(c.custCity)),
-        DataCell(Text('${c.areaRef.id} - ${c.areaName}')),
-        DataCell(
-          Center(
+    return DataRow(cells: [
+      DataCell(Center(child: Text('${index + 1}'))),
+      DataCell(Center(child: Text(c.custId))),
+      DataCell(Text(c.custName)),
+      DataCell(Text(c.custCity)),
+      DataCell(Text('${c.areaRef.id} - ${c.areaName}')),
+      DataCell(
+        Center(
             child: PopupMenuButton<String>(
-              key: Key('select-action'),
-              icon: const Icon(Icons.arrow_drop_down),
-              onSelected: (value) {
-                if (value == 'edit') {
-                  onEdit(c);
-                } else if (value == 'delete') {
-                  onDelete(c.custId);
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  key: Key('edit-customer-button'),
-                  value: 'edit',
-                  child: Row(
-                    children: [
-                      Icon(Icons.edit, color: Colors.blue),
-                      SizedBox(width: 8),
-                      Text('Edit'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  key: Key('delete-customer-button'),
-                  value: 'delete',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete, color: Colors.red),
-                      SizedBox(width: 8),
-                      Text('Delete'),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
+          icon: const Icon(Icons.arrow_drop_down),
+          onSelected: (value) {
+            if (value == 'edit') {
+              onEdit(c);
+            } else if (value == 'delete') {
+              onDelete(c.custId);
+            }
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(
+                value: 'edit',
+                child: Row(children: [
+                  Icon(Icons.edit, color: Colors.blue),
+                  SizedBox(width: 8),
+                  Text('Edit')
+                ])),
+            PopupMenuItem(
+                value: 'delete',
+                child: Row(children: [
+                  Icon(Icons.delete, color: Colors.red),
+                  SizedBox(width: 8),
+                  Text('Delete')
+                ])),
+          ],
+        )),
+      )
+    ]);
   }
 
   @override
   bool get isRowCountApproximate => false;
-
   @override
   int get rowCount => customers.length;
-
   @override
   int get selectedRowCount => 0;
 }

@@ -11,22 +11,17 @@ import 'layouts/areapage.dart';
 import 'layouts/customerpage.dart';
 import 'layouts/dailyreportpage.dart';
 import 'layouts/historitonasepage.dart';
-import 'utils/file_saver.dart';
-import 'utils/pdf_exporter.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-Future<void> main({FileSaver? fileSaver, PdfExporter? pdfExporter}) async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(TonaseApp(fileSaver: fileSaver, pdfExporter: pdfExporter));
+  runApp(TonaseApp());
 }
 
 class TonaseApp extends StatelessWidget {
-  final FileSaver? fileSaver;
-  final PdfExporter? pdfExporter;
-
-  const TonaseApp({super.key, this.fileSaver, this.pdfExporter});
+  const TonaseApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -45,8 +40,7 @@ class TonaseApp extends StatelessWidget {
         '/input-tonase': (context) => const TonaseInputPage(),
         '/area': (context) => const AreaPage(),
         '/customer': (context) => const CustomerPage(),
-        '/daily': (context) =>
-            DailyReportPage(fileSaver: fileSaver, pdfExporter: pdfExporter),
+        '/daily': (context) => const DailyReportPage(),
         '/histori': (context) => HistoriTonasePage(),
       },
     );

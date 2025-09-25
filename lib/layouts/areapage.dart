@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../services/area_service.dart';
 import '../models/area_model.dart';
 
@@ -135,8 +136,7 @@ class _AreaPageState extends State<AreaPage> {
     final idCtrl = TextEditingController(text: area?.areaId);
     final nameCtrl = TextEditingController(text: area?.areaName);
 
-    // Tampilkan dialog, tanpa async di dalam builder
-    final didSave = await showDialog<bool>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (dialogCtx) => AlertDialog(
         title: Text(isEdit ? 'Edit Area' : 'Tambah Area'),
@@ -152,6 +152,8 @@ class _AreaPageState extends State<AreaPage> {
                 enabled: !isEdit,
                 validator: (v) =>
                     (v == null || v.isEmpty) ? 'Wajib diisi' : null,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -160,6 +162,8 @@ class _AreaPageState extends State<AreaPage> {
                 decoration: const InputDecoration(labelText: 'Nama Area'),
                 validator: (v) =>
                     (v == null || v.isEmpty) ? 'Wajib diisi' : null,
+                textCapitalization: TextCapitalization.characters,
+                inputFormatters: [UpperCaseTextFormatter()],
               ),
             ],
           ),
@@ -183,7 +187,7 @@ class _AreaPageState extends State<AreaPage> {
     );
 
     // Setelah dialog ditutup:
-    if (didSave == true) {
+    if (saved == true) {
       final id = idCtrl.text.trim();
       final name = nameCtrl.text.trim();
       final newArea = AreaModel(areaId: id, areaName: name);
@@ -508,4 +512,15 @@ class AreaDataTableSource extends DataTableSource {
 
   @override
   int get selectedRowCount => 0;
+}
+
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
 }

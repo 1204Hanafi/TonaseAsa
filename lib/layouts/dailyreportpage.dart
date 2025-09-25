@@ -1,20 +1,17 @@
 import 'dart:typed_data';
-
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart';
+import 'package:file_saver/file_saver.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import '../utils/file_saver.dart';
-import '../utils/pdf_exporter.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/tonase_service.dart';
 import '../models/tonase_model.dart';
 
 class DailyReportPage extends StatefulWidget {
-  final FileSaver? fileSaver;
-  final PdfExporter? pdfExporter;
-
-  const DailyReportPage({super.key, this.fileSaver, this.pdfExporter});
+  const DailyReportPage({super.key});
 
   @override
   State<DailyReportPage> createState() => _DailyReportPageState();
@@ -36,13 +33,17 @@ class _DailyReportPageState extends State<DailyReportPage> {
       final allTonase = await _tonaseService.getUnsentTonase();
       final filtered = allTonase.where((t) => !t.isSended).toList();
 
-      setState(() {
-        _rekapData = _generateRekapData(filtered);
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _rekapData = _generateRekapData(filtered);
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       debugPrint('Error loading data: $e');
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -53,13 +54,11 @@ class _DailyReportPageState extends State<DailyReportPage> {
     for (var area in areaList) {
       final rawKode = area['kodeArea']!;
       final wilayah = area['wilayah']!;
-      final kodeSet = rawKode
-          .replaceAll('&', ',')
-          .split(',')
-          .map((k) => k.trim())
-          .toSet();
+      final kodeSet =
+          rawKode.replaceAll('&', ',').split(',').map((k) => k.trim()).toSet();
 
       final filtered = tonaseList.where((t) {
+        if (t.areaId.length < 2) return false;
         final areaCode = t.areaId.substring(0, 2);
         return kodeSet.contains(areaCode) && !t.isSended;
       }).toList();
@@ -82,7 +81,6 @@ class _DailyReportPageState extends State<DailyReportPage> {
         'jumlahToko': customerSet.length,
       });
     }
-
     return rekapList;
   }
 
@@ -95,9 +93,8 @@ class _DailyReportPageState extends State<DailyReportPage> {
       'Rabu',
       'Kamis',
       'Jumat',
-      'Sabtu',
+      'Sabtu'
     ][now.weekday % 7];
-
     final bulan = [
       'Januari',
       'Februari',
@@ -110,11 +107,9 @@ class _DailyReportPageState extends State<DailyReportPage> {
       'September',
       'Oktober',
       'November',
-      'Desember',
+      'Desember'
     ][now.month - 1];
-
     final tanggal = "${now.day.toString().padLeft(2, '0')} $bulan ${now.year}";
-
     return "$hari, $tanggal";
   }
 
@@ -179,13 +174,46 @@ class _DailyReportPageState extends State<DailyReportPage> {
     );
   }
 
+  Future<bool> _requestStoragePermission() async {
+    if (kIsWeb) {
+      return true;
+    }
+
+    PermissionStatus status = await Permission.storage.status;
+
+    if (!status.isGranted) {
+      status = await Permission.storage.request();
+    }
+
+    if (status.isGranted) {
+      return true;
+    }
+
+    if (status.isPermanentlyDenied) {
+      _showMessage(
+          'Izin penyimpanan ditolak permanen. Buka pengaturan aplikasi untuk mengizinkan.');
+      await openAppSettings();
+    }
+    return false;
+  }
+
   Future<void> _exportToExcel() async {
+    if (_rekapData.isEmpty) {
+      _showMessage('Tidak ada data untuk diekspor.');
+      return;
+    }
+
     try {
-      // 1. Buat file Excel dan sheet
+      final hasPermission = await _requestStoragePermission();
+      if (!hasPermission) {
+        _showMessage('Izin penyimpanan diperlukan untuk menyimpan file.');
+        return;
+      }
+
       final excel = Excel.createExcel();
       final Sheet sheet = excel['Rekap Tonase'];
 
-      // 2. Header
+      // Header
       sheet.appendRow([
         TextCellValue('Kode Area'),
         TextCellValue('Wilayah'),
@@ -194,7 +222,7 @@ class _DailyReportPageState extends State<DailyReportPage> {
         TextCellValue('Total Tonase'),
       ]);
 
-      // 3. Isi data
+      // Isi data
       for (var row in _rekapData) {
         sheet.appendRow([
           TextCellValue(row['kodeArea']?.toString() ?? ''),
@@ -205,15 +233,27 @@ class _DailyReportPageState extends State<DailyReportPage> {
         ]);
       }
 
-      final bytes = excel.encode()!;
-      await widget.fileSaver?.saveExcel(bytes, 'rekap_tonase$Timestamp.xlsx');
-      _showMessage('File Excel berhasil disimpan');
+      // Encode file Excel menjadi bytes
+      final fileBytes = excel.save();
+
+      if (fileBytes != null) {
+        // Buat nama file yang unik dengan tanggal dan waktu
+        final fileName =
+            'rekap_tonase_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
+
+        // Simpan file menggunakan file_saver
+        await FileSaver.instance.saveFile(
+          name: fileName,
+          bytes: Uint8List.fromList(fileBytes),
+          mimeType: MimeType.microsoftExcel,
+        );
+        _showMessage('File Excel berhasil disimpan');
+      }
     } catch (e) {
-      _showMessage('Gagal mengexport ke Excel: $e');
+      _showMessage('Gagal mengekspor ke Excel: $e');
     }
   }
 
-  // Helper untuk header cell
   pw.Widget _pdfHeaderCell(String text) {
     return pw.Container(
       alignment: pw.Alignment.center,
@@ -230,7 +270,6 @@ class _DailyReportPageState extends State<DailyReportPage> {
     );
   }
 
-  // Helper untuk cell biasa
   pw.Widget _pdfCell(String text) {
     return pw.Container(
       alignment: pw.Alignment.centerLeft,
@@ -239,7 +278,6 @@ class _DailyReportPageState extends State<DailyReportPage> {
     );
   }
 
-  // Helper untuk cell tengah
   pw.Widget _pdfCenteredCell(String text) {
     return pw.Container(
       alignment: pw.Alignment.center,
@@ -249,11 +287,20 @@ class _DailyReportPageState extends State<DailyReportPage> {
   }
 
   Future<void> _exportToPdf() async {
-    try {
-      final pdf = pw.Document();
+    if (_rekapData.isEmpty) {
+      _showMessage('Tidak ada data untuk diekspor.');
+      return;
+    }
 
-      // ignore: deprecated_member_use
-      final headerColor = PdfColor.fromInt(Colors.teal.value);
+    try {
+      final hasPermission = await _requestStoragePermission();
+      if (!hasPermission) {
+        _showMessage('Izin penyimpanan diperlukan untuk menyimpan file.');
+        return;
+      }
+
+      final pdf = pw.Document();
+      final headerColor = PdfColors.teal;
 
       pdf.addPage(
         pw.Page(
@@ -261,23 +308,12 @@ class _DailyReportPageState extends State<DailyReportPage> {
             return pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                pw.Text(
-                  "Report Tonase Per-Area",
-                  style: pw.TextStyle(
-                    fontSize: 20,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
+                pw.Text("Report Tonase Per-Area",
+                    style: pw.TextStyle(
+                        fontSize: 20, fontWeight: pw.FontWeight.bold)),
                 pw.SizedBox(height: 8),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.center,
-                  children: [
-                    pw.Text(
-                      "${_getFormattedDate()}   ${_getFormattedTime()}",
-                      style: const pw.TextStyle(fontSize: 12),
-                    ),
-                  ],
-                ),
+                pw.Text("${_getFormattedDate()}   ${_getFormattedTime()}",
+                    style: const pw.TextStyle(fontSize: 12)),
                 pw.SizedBox(height: 16),
                 pw.Table(
                   border: pw.TableBorder.all(width: 1),
@@ -289,7 +325,6 @@ class _DailyReportPageState extends State<DailyReportPage> {
                     4: const pw.FixedColumnWidth(80),
                   },
                   children: [
-                    // Header
                     pw.TableRow(
                       decoration: pw.BoxDecoration(color: headerColor),
                       children: [
@@ -300,7 +335,6 @@ class _DailyReportPageState extends State<DailyReportPage> {
                         _pdfHeaderCell("Total Tonase"),
                       ],
                     ),
-                    // Data rows
                     ..._rekapData.map((row) {
                       return pw.TableRow(
                         children: [
@@ -309,8 +343,7 @@ class _DailyReportPageState extends State<DailyReportPage> {
                           _pdfCenteredCell(row['jumlahToko'].toString()),
                           _pdfCenteredCell(row['totalKoli'].toString()),
                           _pdfCenteredCell(
-                            row['totalTonase'].toStringAsFixed(2),
-                          ),
+                              row['totalTonase'].toStringAsFixed(2)),
                         ],
                       );
                     }),
@@ -321,11 +354,24 @@ class _DailyReportPageState extends State<DailyReportPage> {
           },
         ),
       );
+
+      // Simpan PDF menjadi bytes
       final Uint8List bytes = await pdf.save();
-      await widget.pdfExporter?.exportPdf(bytes, 'rekap_tonase$Timestamp.pdf');
+
+      // Buat nama file yang unik dengan tanggal dan waktu
+      final fileName =
+          'rekap_tonase_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf';
+
+      // Simpan file menggunakan file_saver
+      await FileSaver.instance.saveFile(
+        name: fileName,
+        bytes: bytes,
+        mimeType: MimeType.pdf,
+      );
+
       _showMessage('File PDF berhasil disimpan');
     } catch (e) {
-      _showMessage('Gagal mengexport ke PDF: $e');
+      _showMessage('Gagal mengekspor ke PDF: $e');
     }
   }
 
@@ -333,19 +379,17 @@ class _DailyReportPageState extends State<DailyReportPage> {
     String msg, {
     Duration duration = const Duration(seconds: 2),
   }) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(msg), duration: duration));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg), duration: duration));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          "Rekap Tonase",
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text("Rekap Tonase",
+            style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: Colors.teal,
         foregroundColor: Colors.white,
       ),
@@ -356,40 +400,29 @@ class _DailyReportPageState extends State<DailyReportPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const Text(
-                    "Report Tonase Per-Area",
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                  ),
+                  const Text("Report Tonase Per-Area",
+                      style:
+                          TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(
-                        Icons.calendar_today,
-                        size: 20,
-                        color: Colors.green,
-                      ),
+                      const Icon(Icons.calendar_today,
+                          size: 20, color: Colors.green),
                       const SizedBox(width: 6),
-                      Text(
-                        _getFormattedDate(),
-                        style: const TextStyle(fontSize: 16),
-                      ),
+                      Text(_getFormattedDate(),
+                          style: const TextStyle(fontSize: 16)),
                     ],
                   ),
                   const SizedBox(height: 6),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(
-                        Icons.access_time,
-                        size: 20,
-                        color: Colors.blue,
-                      ),
+                      const Icon(Icons.access_time,
+                          size: 20, color: Colors.blue),
                       const SizedBox(width: 6),
-                      Text(
-                        _getFormattedTime(),
-                        style: const TextStyle(fontSize: 16),
-                      ),
+                      Text(_getFormattedTime(),
+                          style: const TextStyle(fontSize: 16)),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -400,100 +433,68 @@ class _DailyReportPageState extends State<DailyReportPage> {
                         scrollDirection: Axis.horizontal,
                         child: DataTable(
                           columnSpacing: 16,
-                          headingRowColor: WidgetStateProperty.all<Color>(
-                            Colors.teal,
-                          ),
+                          headingRowColor:
+                              WidgetStateProperty.all<Color>(Colors.teal),
                           columns: const [
                             DataColumn(
-                              label: SizedBox(
-                                width: 85,
-                                child: Text(
-                                  "Kode Area",
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
+                                label: SizedBox(
+                                    width: 85,
+                                    child: Text("Kode Area",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white)))),
                             DataColumn(
-                              label: SizedBox(
-                                width: 90,
-                                child: Text(
-                                  "Wilayah",
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
+                                label: SizedBox(
+                                    width: 90,
+                                    child: Text("Wilayah",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white)))),
                             DataColumn(
-                              label: SizedBox(
-                                width: 50,
-                                child: Text(
-                                  "Jumlah Toko",
-                                  textAlign: TextAlign.center,
-                                  softWrap: true,
-                                  maxLines: 2,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
+                                label: SizedBox(
+                                    width: 50,
+                                    child: Text("Jumlah Toko",
+                                        textAlign: TextAlign.center,
+                                        softWrap: true,
+                                        maxLines: 2,
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white)))),
                             DataColumn(
-                              label: SizedBox(
-                                width: 50,
-                                child: Text(
-                                  "Total Koli",
-                                  textAlign: TextAlign.center,
-                                  softWrap: true,
-                                  maxLines: 2,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
+                                label: SizedBox(
+                                    width: 50,
+                                    child: Text("Total Koli",
+                                        textAlign: TextAlign.center,
+                                        softWrap: true,
+                                        maxLines: 2,
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white)))),
                             DataColumn(
-                              label: SizedBox(
-                                width: 80,
-                                child: Text(
-                                  "Total Tonase",
-                                  textAlign: TextAlign.center,
-                                  softWrap: true,
-                                  maxLines: 2,
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ),
+                                label: SizedBox(
+                                    width: 80,
+                                    child: Text("Total Tonase",
+                                        textAlign: TextAlign.center,
+                                        softWrap: true,
+                                        maxLines: 2,
+                                        style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Colors.white)))),
                           ],
                           rows: _rekapData.map((row) {
                             return DataRow(
                               cells: [
                                 DataCell(Center(child: Text(row['kodeArea']))),
                                 DataCell(Text(row['wilayah'])),
+                                DataCell(Center(
+                                    child: Text('${row['jumlahToko']}'))),
                                 DataCell(
-                                  Center(child: Text('${row['jumlahToko']}')),
-                                ),
-                                DataCell(
-                                  Center(child: Text('${row['totalKoli']}')),
-                                ),
-                                DataCell(
-                                  Center(
+                                    Center(child: Text('${row['totalKoli']}'))),
+                                DataCell(Center(
                                     child: Text(
-                                      '${row['totalTonase'].toStringAsFixed(2)}',
-                                    ),
-                                  ),
-                                ),
+                                        '${row['totalTonase'].toStringAsFixed(2)}'))),
                               ],
                             );
                           }).toList(),
@@ -502,8 +503,6 @@ class _DailyReportPageState extends State<DailyReportPage> {
                     ),
                   ),
                   const SizedBox(height: 20),
-
-                  // Tombol Export
                   ElevatedButton.icon(
                     key: Key('export-button'),
                     onPressed: _exportData,
@@ -513,9 +512,7 @@ class _DailyReportPageState extends State<DailyReportPage> {
                       backgroundColor: Colors.teal,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 12,
-                      ),
+                          horizontal: 20, vertical: 12),
                     ),
                   ),
                 ],

@@ -1,13 +1,10 @@
-// Salin dan ganti seluruh isi file lib/layouts/customerpage.dart
-
 import 'dart:convert';
-import 'dart:io';
-import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:csv/csv.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/area_model.dart';
 import '../models/customer_model.dart';
@@ -127,17 +124,17 @@ class _CustomerPageState extends State<CustomerPage> {
   Future<void> _onDeleteConfirm(String custId) async {
     final confirmed = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
+        builder: (dialogContext) => AlertDialog(
               title: const Text('Konfirmasi Hapus'),
               content: const Text('Yakin ingin menghapus customer ini?'),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
+                  onPressed: () => Navigator.pop(dialogContext, false),
                   child: const Text('Batal'),
                 ),
                 ElevatedButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                  onPressed: () => Navigator.pop(ctx, true),
                   child: const Text('Hapus',
                       style: TextStyle(color: Colors.white)),
                 ),
@@ -150,7 +147,7 @@ class _CustomerPageState extends State<CustomerPage> {
         _showMessage('Berhasil dihapus');
         await _loadCustomers();
       } catch (e) {
-        _showError('Gagal Hapus: ${e.toString()}');
+        _showError('Gagal Hapus: ${_getErrorMessage(e)}');
       }
     }
   }
@@ -177,11 +174,18 @@ class _CustomerPageState extends State<CustomerPage> {
                     children: [
                       TextFormField(
                         controller: idCtrl,
-                        decoration:
-                            const InputDecoration(labelText: 'Customer ID'),
+                        decoration: const InputDecoration(
+                          labelText: 'Customer ID',
+                          counterText: "",
+                        ),
                         enabled: !isEdit,
                         validator: (v) =>
                             (v == null || v.isEmpty) ? 'Wajib Diisi' : null,
+                        keyboardType: TextInputType.number,
+                        maxLength: 5,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly
+                        ],
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
@@ -190,6 +194,8 @@ class _CustomerPageState extends State<CustomerPage> {
                             const InputDecoration(labelText: 'Customer Name'),
                         validator: (v) =>
                             (v == null || v.isEmpty) ? 'Wajib Diisi' : null,
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [UpperCaseTextFormatter()],
                       ),
                       const SizedBox(height: 8),
                       TextFormField(
@@ -198,6 +204,8 @@ class _CustomerPageState extends State<CustomerPage> {
                             const InputDecoration(labelText: 'Customer City'),
                         validator: (v) =>
                             (v == null || v.isEmpty) ? 'Wajib Diisi' : null,
+                        textCapitalization: TextCapitalization.characters,
+                        inputFormatters: [UpperCaseTextFormatter()],
                       ),
                       const SizedBox(height: 8),
                       FutureBuilder<List<AreaModel>>(
@@ -223,7 +231,8 @@ class _CustomerPageState extends State<CustomerPage> {
                             items: list
                                 .map((area) => DropdownMenuItem(
                                       value: area.reference,
-                                      child: Text(area.areaName),
+                                      child: Text(
+                                          '[${area.areaId}] ${area.areaName}'),
                                     ))
                                 .toList(),
                             validator: (v) => v == null ? 'Pilih Area' : null,
@@ -253,7 +262,7 @@ class _CustomerPageState extends State<CustomerPage> {
 
     if (saved == true) {
       final cust = CustomerModel(
-        custId: idCtrl.text.trim(),
+        custId: idCtrl.text.trim().padLeft(5, '0'),
         custName: nameCtrl.text.trim(),
         custCity: cityCtrl.text.trim(),
         areaRef: areaRef!,
@@ -299,17 +308,25 @@ class _CustomerPageState extends State<CustomerPage> {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['csv'],
+      withData: true,
     );
-    if (result == null || result.files.single.path == null) {
+
+    if (result == null) {
       _showMessage('Tidak ada file yang dipilih.');
       return;
     }
+
     setState(() => _isLoading = true);
+
     try {
-      final file = File(result.files.single.path!);
-      final content = await file.readAsString();
+      final Uint8List? fileBytes = result.files.first.bytes;
+      if (fileBytes == null) {
+        throw Exception("Gagal membaca file.");
+      }
+      final String content = utf8.decode(fileBytes);
+
       final List<List<dynamic>> rows =
-          const CsvToListConverter().convert(content);
+          const CsvToListConverter(eol: '\n').convert(content);
 
       if (rows.length < 2) {
         throw Exception('File CSV kosong atau hanya berisi header.');
@@ -318,29 +335,44 @@ class _CustomerPageState extends State<CustomerPage> {
       final areas = await _areaService.getAreas();
       final areaMap = {for (var area in areas) area.areaId: area.reference};
 
+      final batch = FirebaseFirestore.instance.batch();
+
       for (var i = 1; i < rows.length; i++) {
         final row = rows[i];
-        final areaRef = areaMap[row[3].toString().trim()];
-        if (areaRef != null) {
-          final newCustomer = CustomerModel(
-            custId: row[0].toString().trim(),
-            custName: row[1].toString().trim(),
-            custCity: row[2].toString().trim(),
-            areaRef: areaRef,
-          );
-          await _customerService.addCustomer(newCustomer);
+        if (row.length < 4) continue;
+
+        final custId = row[0].toString().trim().padLeft(5, '0');
+        final custName = row[1].toString().trim();
+        final custCity = row[2].toString().trim();
+        final areaId = row[3].toString().trim();
+        final areaRef = areaMap[areaId];
+
+        if (custId.isNotEmpty && areaRef != null) {
+          final docRef = _customerService.customerCollection.doc(custId);
+          batch.set(docRef, {
+            'custName': custName,
+            'custCity': custCity,
+            'areaId': areaRef,
+          });
         }
       }
 
+      await batch.commit();
+
       if (!mounted) return;
-      _showMessage('Proses impor selesai.');
+      _showMessage('${rows.length - 1} data berhasil diimpor.');
       await _loadCustomers();
     } catch (e) {
-      _showError('Gagal memproses file CSV: ${e.toString()}');
+      if (!mounted) return;
+      _showError(
+          'Gagal memproses file CSV: ${e.toString().replaceFirst('Exception: ', '')}');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
+
+  String _getErrorMessage(Object e) =>
+      e is AreaException ? e.message : e.toString();
 
   void _showError(String msg) => ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
@@ -381,11 +413,11 @@ class _CustomerPageState extends State<CustomerPage> {
               child: const Icon(Icons.add, color: Colors.white),
             )
           : null,
-      body: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Column(
-          children: [
-            TextField(
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: TextField(
               controller: _searchController,
               onChanged: _applyFilter,
               decoration: InputDecoration(
@@ -394,7 +426,7 @@ class _CustomerPageState extends State<CustomerPage> {
                 border:
                     OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 suffixIcon: IconButton(
-                  icon: const Icon(Icons.clear),
+                  icon: const Icon(Icons.clear, semanticLabel: 'Bersihkan'),
                   onPressed: () {
                     _searchController.clear();
                     _applyFilter('');
@@ -402,14 +434,13 @@ class _CustomerPageState extends State<CustomerPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 10),
-            Expanded(
-              child: _isLoading
-                  ? const Center(child: CircularProgressIndicator())
-                  : _buildResponsiveDataTable(),
-            )
-          ],
-        ),
+          ),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _buildResponsiveDataTable(),
+          )
+        ],
       ),
     );
   }
@@ -432,77 +463,83 @@ class _CustomerPageState extends State<CustomerPage> {
       itemBuilder: (context, index) {
         final c = _filteredCustomers[index];
         return Card(
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    CircleAvatar(
-                        backgroundColor: Colors.teal[100],
-                        child: Text('${index + 1}',
-                            style: const TextStyle(
-                                fontSize: 12,
-                                color: Colors.teal,
-                                fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 16),
-                    Expanded(
-                        child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                          Text('${[c.custId]} ${c.custName}',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 2),
-                          RichText(
-                            text: TextSpan(
-                              style: DefaultTextStyle.of(context)
-                                  .style
-                                  .copyWith(color: Colors.black54),
-                              children: <TextSpan>[
-                                const TextSpan(
-                                    text: 'Kota: ',
-                                    style:
-                                        TextStyle(fontWeight: FontWeight.bold)),
-                                TextSpan(text: '${c.custCity}\n'),
-                                const TextSpan(
-                                    text: 'Area: ',
-                                    style:
-                                        TextStyle(fontWeight: FontWeight.bold)),
-                                TextSpan(
-                                    text: '${[c.areaRef.id]} ${c.areaName}'),
-                              ],
-                            ),
-                          )
-                        ])),
-                    PopupMenuButton<String>(
-                      onSelected: (value) {
-                        if (value == 'edit') {
-                          _onEdit(c);
-                        } else if (value == 'delete') {
-                          _onDeleteConfirm(c.custId);
-                        }
-                      },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                            value: 'edit',
-                            child: Row(children: [
-                              Icon(Icons.edit, color: Colors.blue),
-                              SizedBox(width: 8),
-                              Text('Edit')
-                            ])),
-                        PopupMenuItem(
-                            value: 'delete',
-                            child: Row(children: [
-                              Icon(Icons.delete, color: Colors.red),
-                              SizedBox(width: 8),
-                              Text('Delete')
-                            ])),
-                      ],
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 8.0, vertical: 12.0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                CircleAvatar(
+                    backgroundColor: Colors.teal[100],
+                    child: Text('${index + 1}',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.teal,
+                            fontWeight: FontWeight.bold))),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${[c.custId]} ${c.custName}',
+                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 2),
+                      RichText(
+                        text: TextSpan(
+                          style: DefaultTextStyle.of(context)
+                              .style
+                              .copyWith(color: Colors.black54),
+                          children: <TextSpan>[
+                            const TextSpan(
+                                text: 'Kota: ',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            TextSpan(text: '${c.custCity}\n'),
+                            const TextSpan(
+                                text: 'Area: ',
+                                style: TextStyle(fontWeight: FontWeight.bold)),
+                            TextSpan(text: '${[c.areaRef.id]} ${c.areaName}'),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      _onEdit(c);
+                    } else if (value == 'delete') {
+                      _onDeleteConfirm(c.custId);
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit, color: Colors.blue),
+                          SizedBox(width: 8),
+                          Text('Edit')
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete, color: Colors.red),
+                          SizedBox(width: 8),
+                          Text('Delete')
+                        ],
+                      ),
                     ),
                   ],
-                )));
+                ),
+              ],
+            ),
+          ),
+        );
       },
     );
   }
@@ -522,46 +559,49 @@ class _CustomerPageState extends State<CustomerPage> {
             : minTableWidth;
 
         return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: tableWidth,
-            child: PaginatedDataTable(
-              header: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('Daftar Customer',
-                      style:
-                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  ElevatedButton.icon(
-                    onPressed: () => _showAddEditDialog(),
-                    icon: const Icon(Icons.add),
-                    label: const Text('Tambah Customer'),
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal,
-                        foregroundColor: Colors.white),
-                  ),
+          scrollDirection: Axis.vertical,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: tableWidth,
+              child: PaginatedDataTable(
+                header: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Daftar Customer',
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    ElevatedButton.icon(
+                      onPressed: () => _showAddEditDialog(),
+                      icon: const Icon(Icons.add),
+                      label: const Text('Tambah Customer'),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal,
+                          foregroundColor: Colors.white),
+                    ),
+                  ],
+                ),
+                columns: [
+                  _buildDataColumn('No'),
+                  _buildDataColumn('ID',
+                      onSort: (ci, _) => _onSort((c) => c.custId, ci)),
+                  _buildDataColumn('Nama',
+                      onSort: (ci, _) => _onSort((c) => c.custName, ci)),
+                  _buildDataColumn('Kota',
+                      onSort: (ci, _) => _onSort((c) => c.custCity, ci)),
+                  _buildDataColumn('Area',
+                      onSort: (ci, _) => _onSort((c) => c.areaName, ci)),
+                  _buildDataColumn('Aksi'),
                 ],
+                source: _dataSource!,
+                rowsPerPage: rowsPerPage,
+                sortColumnIndex: _sortColumnIndex,
+                sortAscending: _sortAscending,
+                showFirstLastButtons: true,
+                columnSpacing: 20,
+                horizontalMargin: 16,
+                headingRowColor: WidgetStateProperty.all<Color>(Colors.teal),
               ),
-              columns: [
-                _buildDataColumn('No'),
-                _buildDataColumn('ID',
-                    onSort: (ci, _) => _onSort((c) => c.custId, ci)),
-                _buildDataColumn('Nama',
-                    onSort: (ci, _) => _onSort((c) => c.custName, ci)),
-                _buildDataColumn('Kota',
-                    onSort: (ci, _) => _onSort((c) => c.custCity, ci)),
-                _buildDataColumn('Area',
-                    onSort: (ci, _) => _onSort((c) => c.areaName, ci)),
-                _buildDataColumn('Aksi'),
-              ],
-              source: _dataSource!,
-              rowsPerPage: rowsPerPage,
-              sortColumnIndex: _sortColumnIndex,
-              sortAscending: _sortAscending,
-              showFirstLastButtons: true,
-              columnSpacing: 20,
-              horizontalMargin: 16,
-              headingRowColor: WidgetStateProperty.all<Color>(Colors.teal),
             ),
           ),
         );
@@ -645,4 +685,15 @@ class CustomerDataTableSource extends DataTableSource {
   int get rowCount => customers.length;
   @override
   int get selectedRowCount => 0;
+}
+
+class UpperCaseTextFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    return TextEditingValue(
+      text: newValue.text.toUpperCase(),
+      selection: newValue.selection,
+    );
+  }
 }

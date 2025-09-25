@@ -187,9 +187,12 @@ class _HomePageState extends State<HomePage> {
     if (ok == true) {
       try {
         await _tonaseService.deleteTonase(item.tonId);
+
+        if (!mounted) return;
         _showMessage('Berhasil Dihapus');
         await _loadTonase();
       } catch (e) {
+        if (!mounted) return;
         _showError('Gagal Hapus Data: $e');
       }
     }
@@ -197,11 +200,20 @@ class _HomePageState extends State<HomePage> {
 
   void _onViewDetails(TonaseModel item) {
     const maxPerCol = 10;
-    final list = item.detailTonase
-        .asMap()
-        .entries
-        .map((e) => '${e.key + 1}. ${e.value.toStringAsFixed(2)} kg')
-        .toList();
+    final List<String> list;
+    if (item.detailTonase.isNotEmpty && item.detailTonase.first is Map) {
+      list = item.detailTonase.asMap().entries.map((e) {
+        final detailMap = e.value as Map;
+        final berat = (detailMap['berat'] as num?)?.toDouble() ?? 0.0;
+        final keterangan = detailMap['keterangan']?.toString() ?? '';
+        return '${e.key + 1}. ${berat.toStringAsFixed(2)} kg [$keterangan pcs]';
+      }).toList();
+    } else {
+      list = item.detailTonase.asMap().entries.map((e) {
+        final berat = (e.value as num?)?.toDouble() ?? 0.0;
+        return '${e.key + 1}. ${berat.toStringAsFixed(2)} kg';
+      }).toList();
+    }
     final cols = (list.length / maxPerCol).ceil();
     showDialog(
       context: context,
@@ -227,6 +239,7 @@ class _HomePageState extends State<HomePage> {
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: List.generate(cols, (col) {
                     final start = col * maxPerCol;
                     final end = (start + maxPerCol).clamp(0, list.length);
@@ -271,6 +284,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _handleMarkAsSend() async {
+    if (!mounted) return;
     final items = _dataSource!.getSelectedItems();
     if (items.isEmpty) {
       _showMessage('Tidak Ada Data yang dipilih.');
@@ -285,9 +299,12 @@ class _HomePageState extends State<HomePage> {
         );
       }
       await batch.commit();
+
+      if (!mounted) return;
       _showMessage('Data Berhasil di Kirim.');
       await _loadTonase();
     } catch (e) {
+      if (!mounted) return;
       _showError('Terjadi Kesalahan: $e');
     }
   }
@@ -379,7 +396,7 @@ class _HomePageState extends State<HomePage> {
                       (a) => DropdownMenuItem(
                         key: const Key('select-area'),
                         value: a,
-                        child: Text(a.areaName),
+                        child: Text('[${a.areaId}] ${a.areaName}'),
                       ),
                     )
                     .toList(),
@@ -391,7 +408,6 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 10),
         Center(
           child: Wrap(
-            // Gunakan Wrap agar tombol bisa turun ke bawah di layar kecil
             spacing: 8.0,
             runSpacing: 4.0,
             alignment: WrapAlignment.center,
@@ -447,215 +463,350 @@ class _HomePageState extends State<HomePage> {
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth > 720) {
-          return _buildDesktopDataTable(); // Tampilan desktop
+          return _buildDesktopDataTable();
         } else {
-          return _buildMobileListView(); // Tampilan mobile
+          return _buildMobileListView();
         }
       },
     );
   }
 
-  // Widget baru untuk tampilan mobile (ListView)
   Widget _buildMobileListView() {
     final items = _dataSource?.filteredRows ?? [];
+    final areAllSelected =
+        items.isNotEmpty && _dataSource?.selectedRowCount == items.length;
+
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
-          child: TextField(
-            key: const Key('search-field-mobile'),
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Cari Toko, Kota, atau No. PK...',
-              prefixIcon: const Icon(Icons.search),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    height: 24.0,
+                    width: 48.0,
+                    child: Tooltip(
+                      message:
+                          areAllSelected ? 'Batal Pilih Semua' : 'Pilih Semua',
+                      child: Checkbox(
+                        visualDensity: VisualDensity.compact,
+                        value: areAllSelected,
+                        onChanged: (bool? value) {
+                          if (value == true) {
+                            _dataSource?.selectAll();
+                          } else {
+                            _dataSource?.clearSelection();
+                          }
+                          setState(() {});
+                        },
+                        activeColor: Colors.teal,
+                      ),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2.0),
+                    child: Text('All',
+                        style: TextStyle(fontSize: 11, color: Colors.black54)),
+                  ),
+                ],
               ),
-              isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-            ),
+              Expanded(
+                child: TextField(
+                  key: const Key('search-field-mobile'),
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Cari Toko, Kota, atau No. PK...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         Expanded(
-            child: items.isEmpty
-                ? const Center(child: Text("Tidak ada data untuk ditampilkan."))
-                : ListView.builder(
-                    itemCount: items.length,
-                    itemBuilder: (context, index) {
-                      final item = items[index];
-                      final isSelected = _dataSource?.isSelected(item) ?? false;
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 4),
-                        color: isSelected ? Colors.teal[300] : null,
-                        child: InkWell(
-                          onTap: () {
-                            _dataSource?.toggleSelection(item);
-                            setState(() {});
-                          },
-                          onLongPress: () => _onViewDetails(item),
-                          child: Padding(
-                            padding: const EdgeInsets.all(12.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                RichText(
-                                  text: TextSpan(
-                                    children: [
-                                      TextSpan(
-                                        text: item.custName,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            color: Colors.black),
-                                      ),
-                                      TextSpan(
-                                        text: ' | ${item.custCity}',
-                                        style: const TextStyle(
-                                            fontSize: 12, color: Colors.black),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                RichText(
-                                  text: TextSpan(
-                                      style: DefaultTextStyle.of(context)
-                                          .style
-                                          .copyWith(fontSize: 14),
-                                      children: [
-                                        const TextSpan(
-                                            text: 'Area: ',
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold)),
-                                        TextSpan(
-                                            text:
-                                                '[${item.areaId}] ${item.areaName}'),
-                                      ]),
-                                ),
-                                RichText(
-                                  text: TextSpan(
-                                      style: DefaultTextStyle.of(context)
-                                          .style
-                                          .copyWith(fontSize: 14),
-                                      children: [
-                                        const TextSpan(
-                                            text: 'No.PK: ',
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold)),
-                                        TextSpan(text: '${item.noSj} | '),
-                                        const TextSpan(
-                                            text: 'Tgl: ',
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold)),
-                                        TextSpan(
-                                            text:
-                                                DateFormat('dd MMM yyyy, HH:mm')
-                                                    .format(item.date)),
-                                      ]),
-                                ),
-                                const Divider(height: 16),
-                                Row(
-                                  mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+          child: items.isEmpty
+              ? const Center(child: Text("Tidak ada data untuk ditampilkan."))
+              : ListView.builder(
+                  itemCount: items.length,
+                  itemBuilder: (context, index) {
+                    final item = items[index];
+                    final isSelected = _dataSource?.isSelected(item) ?? false;
+                    return Card(
+                      margin: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 4),
+                      color: isSelected ? Colors.teal[300] : null,
+                      child: InkWell(
+                        onTap: () {
+                          _dataSource?.toggleSelection(item);
+                          setState(() {});
+                        },
+                        onLongPress: () => _onViewDetails(item),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              RichText(
+                                text: TextSpan(
                                   children: [
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        RichText(
-                                          text: TextSpan(
-                                              style:
-                                                  DefaultTextStyle.of(context)
-                                                      .style
-                                                      .copyWith(fontSize: 14),
-                                              children: [
-                                                const TextSpan(
-                                                    text: 'Total Koli: ',
-                                                    style: TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.bold)),
-                                                TextSpan(
-                                                    text: '${item.totalKoli}'),
-                                              ]),
-                                        ),
-                                        RichText(
-                                          text: TextSpan(
-                                              style:
-                                                  DefaultTextStyle.of(context)
-                                                      .style
-                                                      .copyWith(fontSize: 14),
-                                              children: [
-                                                const TextSpan(
-                                                    text: 'Total Tonase: ',
-                                                    style: TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.bold)),
-                                                TextSpan(
-                                                    text:
-                                                        '${item.totalTonase.toStringAsFixed(2)} kg'),
-                                              ]),
-                                        ),
-                                      ],
+                                    TextSpan(
+                                      text: item.custName,
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.black),
                                     ),
-                                    PopupMenuButton<String>(
-                                      key: const Key('select-action'),
-                                      onSelected: (value) {
-                                        if (value == 'viewDetails') {
-                                          _onViewDetails(item);
-                                        } else if (value == 'edit') {
-                                          _onEdit(item);
-                                        } else if (value == 'delete') {
-                                          _onDeleteConfirm(item);
-                                        }
-                                      },
-                                      itemBuilder: (_) => const [
-                                        PopupMenuItem(
-                                          key: Key('viewDetails-button'),
-                                          value: 'viewDetails',
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.remove_red_eye,
-                                                  color: Colors.green),
-                                              SizedBox(width: 8),
-                                              Text('View Details'),
-                                            ],
-                                          ),
-                                        ),
-                                        PopupMenuItem(
-                                          key: Key('edit-button'),
-                                          value: 'edit',
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.edit,
-                                                  color: Colors.blue),
-                                              SizedBox(width: 8),
-                                              Text('Edit'),
-                                            ],
-                                          ),
-                                        ),
-                                        PopupMenuItem(
-                                          key: Key('delete-button'),
-                                          value: 'delete',
-                                          child: Row(
-                                            children: [
-                                              Icon(Icons.delete,
-                                                  color: Colors.red),
-                                              SizedBox(width: 8),
-                                              Text('Delete'),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
+                                    TextSpan(
+                                      text: ' | ${item.custCity}',
+                                      style: const TextStyle(
+                                          fontSize: 12, color: Colors.black),
                                     ),
                                   ],
                                 ),
-                              ],
-                            ),
+                              ),
+                              RichText(
+                                text: TextSpan(
+                                    style: DefaultTextStyle.of(context)
+                                        .style
+                                        .copyWith(fontSize: 14),
+                                    children: [
+                                      const TextSpan(
+                                          text: 'Area: ',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold)),
+                                      TextSpan(
+                                          text:
+                                              '[${item.areaId}] ${item.areaName}'),
+                                    ]),
+                              ),
+                              RichText(
+                                text: TextSpan(
+                                    style: DefaultTextStyle.of(context)
+                                        .style
+                                        .copyWith(fontSize: 14),
+                                    children: [
+                                      const TextSpan(
+                                          text: 'No.PK: ',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold)),
+                                      TextSpan(text: '${item.noSj} | '),
+                                      const TextSpan(
+                                          text: 'Tgl: ',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold)),
+                                      TextSpan(
+                                          text: DateFormat('dd MMM yyyy, HH:mm')
+                                              .format(item.date)),
+                                    ]),
+                              ),
+                              const Divider(height: 16),
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      RichText(
+                                        text: TextSpan(
+                                            style: DefaultTextStyle.of(context)
+                                                .style
+                                                .copyWith(fontSize: 14),
+                                            children: [
+                                              const TextSpan(
+                                                  text: 'Total Koli: ',
+                                                  style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold)),
+                                              TextSpan(
+                                                  text: '${item.totalKoli}'),
+                                            ]),
+                                      ),
+                                      RichText(
+                                        text: TextSpan(
+                                            style: DefaultTextStyle.of(context)
+                                                .style
+                                                .copyWith(fontSize: 14),
+                                            children: [
+                                              const TextSpan(
+                                                  text: 'Total Tonase: ',
+                                                  style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold)),
+                                              TextSpan(
+                                                  text:
+                                                      '${item.totalTonase.toStringAsFixed(2)} kg'),
+                                            ]),
+                                      ),
+                                    ],
+                                  ),
+                                  PopupMenuButton<String>(
+                                    key: const Key('select-action'),
+                                    onSelected: (value) {
+                                      if (value == 'viewDetails') {
+                                        _onViewDetails(item);
+                                      } else if (value == 'edit') {
+                                        _onEdit(item);
+                                      } else if (value == 'delete') {
+                                        _onDeleteConfirm(item);
+                                      }
+                                    },
+                                    itemBuilder: (_) => const [
+                                      PopupMenuItem(
+                                        key: Key('viewDetails-button'),
+                                        value: 'viewDetails',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.remove_red_eye,
+                                                color: Colors.green),
+                                            SizedBox(width: 8),
+                                            Text('View Details'),
+                                          ],
+                                        ),
+                                      ),
+                                      PopupMenuItem(
+                                        key: Key('edit-button'),
+                                        value: 'edit',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.edit,
+                                                color: Colors.blue),
+                                            SizedBox(width: 8),
+                                            Text('Edit'),
+                                          ],
+                                        ),
+                                      ),
+                                      PopupMenuItem(
+                                        key: Key('delete-button'),
+                                        value: 'delete',
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.delete,
+                                                color: Colors.red),
+                                            SizedBox(width: 8),
+                                            Text('Delete'),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-                      );
-                    }))
+                      ),
+                    );
+                  },
+                ),
+        ),
       ],
+    );
+  }
+
+  Widget _buildDesktopDataTable() {
+    final minTableWidth = 900.0;
+    final defaultRowsPerPage = 10;
+    final availableRows = (_dataSource?.rowCount ?? 0);
+    final rowsPerPage = availableRows > defaultRowsPerPage
+        ? defaultRowsPerPage
+        : (availableRows == 0 ? 1 : availableRows);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth > minTableWidth
+            ? constraints.maxWidth
+            : minTableWidth;
+
+        return SingleChildScrollView(
+          scrollDirection: Axis.vertical,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: tableWidth,
+              child: PaginatedDataTable(
+                key: const Key('home-data-table'),
+                header: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Data Tonase',
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(
+                      width: 220,
+                      child: TextField(
+                        key: const Key('search-field'),
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          hintText: 'Search',
+                          prefixIcon: const Icon(Icons.search),
+                          suffixIcon: IconButton(
+                            key: const Key('clear-search'),
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                              _applyFilters();
+                            },
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 8,
+                            horizontal: 12,
+                          ),
+                        ),
+                        onChanged: (_) => _applyFilters(),
+                      ),
+                    ),
+                  ],
+                ),
+                showCheckboxColumn: true,
+                onSelectAll: (all) {
+                  if (all == null) return;
+                  setState(() => all
+                      ? _dataSource!.selectAll()
+                      : _dataSource!.clearSelection());
+                },
+                headingRowColor: WidgetStateProperty.all<Color>(Colors.teal),
+                columns: [
+                  _buildDataColumn('Tanggal'),
+                  _buildDataColumn('Toko'),
+                  _buildDataColumn('No. PK'),
+                  _buildDataColumn('Area'),
+                  _buildDataColumn('Koli', numeric: true),
+                  _buildDataColumn('Tonase', numeric: true),
+                  _buildDataColumn('Aksi'),
+                ],
+                source: _dataSource ??
+                    TonaseDataTableSource(
+                      tonaseList: [],
+                      onEdit: _onEdit,
+                      onDelete: _onDeleteConfirm,
+                      onViewDetail: _onViewDetails,
+                    ),
+                rowsPerPage: rowsPerPage,
+                showFirstLastButtons: true,
+                columnSpacing: 20,
+                horizontalMargin: 16,
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -672,99 +823,6 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildDesktopDataTable() {
-    final minTableWidth = 900.0;
-    final defaultRowsPerPage = 10;
-    final availableRows = (_dataSource?.rowCount ?? 0);
-    final rowsPerPage = availableRows > defaultRowsPerPage
-        ? defaultRowsPerPage
-        : (availableRows == 0 ? 1 : availableRows);
-
-    // Menggunakan LayoutBuilder untuk mendapatkan lebar layar
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final tableWidth = constraints.maxWidth > minTableWidth
-            ? constraints.maxWidth
-            : minTableWidth;
-
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: tableWidth, // Terapkan lebar responsif di sini
-            child: PaginatedDataTable(
-              key: const Key('home-data-table'),
-              header: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'Data Tonase',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(
-                    width: 220,
-                    child: TextField(
-                      key: const Key('search-field'),
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search',
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: IconButton(
-                          key: const Key('clear-search'),
-                          icon: const Icon(Icons.clear),
-                          onPressed: () {
-                            _searchController.clear();
-                            _applyFilters();
-                          },
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 8,
-                          horizontal: 12,
-                        ),
-                      ),
-                      onChanged: (_) => _applyFilters(),
-                    ),
-                  ),
-                ],
-              ),
-              showCheckboxColumn: true,
-              onSelectAll: (all) {
-                if (all == null) return;
-                setState(() => all
-                    ? _dataSource!.selectAll()
-                    : _dataSource!.clearSelection());
-              },
-              headingRowColor: WidgetStateProperty.all<Color>(Colors.teal),
-              columns: [
-                _buildDataColumn('Tanggal'),
-                _buildDataColumn('Toko'),
-                _buildDataColumn('No. PK'),
-                _buildDataColumn('Area'),
-                _buildDataColumn('Koli', numeric: true),
-                _buildDataColumn('Tonase', numeric: true),
-                _buildDataColumn('Aksi'),
-              ],
-              source: _dataSource ??
-                  TonaseDataTableSource(
-                    tonaseList: [],
-                    onEdit: _onEdit,
-                    onDelete: _onDeleteConfirm,
-                    onViewDetail: _onViewDetails,
-                  ),
-              rowsPerPage: rowsPerPage,
-              showFirstLastButtons: true,
-              columnSpacing: 20,
-              horizontalMargin: 16,
-            ),
-          ),
-        );
-      },
     );
   }
 
@@ -818,11 +876,15 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  void _showError(String msg) => ScaffoldMessenger.of(context)
-      .showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.red));
+  }
 
   void _showMessage(String msg,
       {Duration duration = const Duration(seconds: 2)}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(msg), duration: duration));
   }
@@ -1053,5 +1115,5 @@ class TonaseDataTableSource extends DataTableSource {
   bool get isRowCountApproximate => false;
 
   @override
-  int get selectedRowCount => 0;
+  int get selectedRowCount => _selectedRows.length;
 }

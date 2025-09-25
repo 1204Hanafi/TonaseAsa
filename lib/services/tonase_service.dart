@@ -4,8 +4,12 @@ import '../models/tonase_model.dart';
 import '../models/customer_model.dart';
 
 class TonaseService {
-  final CollectionReference tonaseCollection = FirebaseFirestore.instance
-      .collection('tonase');
+  TonaseService() {
+    FirebaseFirestore.instance.settings =
+        const Settings(persistenceEnabled: true);
+  }
+  final CollectionReference tonaseCollection =
+      FirebaseFirestore.instance.collection('tonase');
 
   List<CustomerModel> customers = [];
 
@@ -18,21 +22,20 @@ class TonaseService {
     String mmdd = DateFormat('MMdd').format(date);
 
     // Ambil semua dokumen dengan tanggal yang sama
-    QuerySnapshot snapshot =
-        await tonaseCollection
-            .where(
-              'date',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(
-                DateTime(date.year, date.month, date.day),
-              ),
-            )
-            .where(
-              'date',
-              isLessThan: Timestamp.fromDate(
-                DateTime(date.year, date.month, date.day + 1),
-              ),
-            )
-            .get();
+    QuerySnapshot snapshot = await tonaseCollection
+        .where(
+          'date',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(
+            DateTime(date.year, date.month, date.day),
+          ),
+        )
+        .where(
+          'date',
+          isLessThan: Timestamp.fromDate(
+            DateTime(date.year, date.month, date.day + 1),
+          ),
+        )
+        .get();
 
     int currentCount = snapshot.docs.length;
     int nextNumber = currentCount + 1;
@@ -98,6 +101,8 @@ class TonaseService {
       if (await isTonIdExists(generatedTonId)) {
         throw Exception("Tonase ID '$generatedTonId' sudah digunakan");
       }
+
+      await Future.delayed(const Duration(milliseconds: 100));
 
       await tonaseCollection.doc(generatedTonId).set({
         'date': tonase.date,

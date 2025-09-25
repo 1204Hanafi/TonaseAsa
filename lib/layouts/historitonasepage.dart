@@ -116,27 +116,37 @@ class _HistoriTonasePageState extends State<HistoriTonasePage> {
       }
       await batch.commit();
 
+      if (!mounted) return;
       _showMessage('Berhasil Unmark Data.');
 
       if (!mounted) return;
-      // Kembali ke HomePage dan refresh
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (_) => const HomePage()),
         (route) => false,
       );
     } catch (e) {
+      if (!mounted) return;
       _showError('Gagal Unmark: $e');
     }
   }
 
   void _onViewDetails(TonaseModel item) {
     const maxPerCol = 10;
-    final list = item.detailTonase
-        .asMap()
-        .entries
-        .map((e) => '${e.key + 1}. ${e.value.toStringAsFixed(2)} kg')
-        .toList();
+    final List<String> list;
+    if (item.detailTonase.isNotEmpty && item.detailTonase.first is Map) {
+      list = item.detailTonase.asMap().entries.map((e) {
+        final detailMap = e.value as Map;
+        final berat = (detailMap['berat'] as num?)?.toDouble() ?? 0.0;
+        final keterangan = detailMap['keterangan']?.toString() ?? '';
+        return '${e.key + 1}. ${berat.toStringAsFixed(2)} kg [$keterangan pcs]';
+      }).toList();
+    } else {
+      list = item.detailTonase.asMap().entries.map((e) {
+        final berat = (e.value as num?)?.toDouble() ?? 0.0;
+        return '${e.key + 1}. ${berat.toStringAsFixed(2)} kg';
+      }).toList();
+    }
     final cols = (list.length / maxPerCol).ceil();
     showDialog(
       context: context,
@@ -301,19 +311,60 @@ class _HistoriTonasePageState extends State<HistoriTonasePage> {
 
   Widget _buildMobileListView() {
     final items = _dataSource?.filteredRows ?? [];
+    final areAllSelected =
+        items.isNotEmpty && _dataSource?.selectedRowCount == items.length;
+
     return Column(
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 8.0),
-          child: TextField(
-            controller: _searchController,
-            decoration: InputDecoration(
-              hintText: 'Cari Toko, Kota, atau No. PK...',
-              prefixIcon: const Icon(Icons.search),
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-              isDense: true,
-            ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(
+                    height: 24.0,
+                    width: 48.0,
+                    child: Tooltip(
+                      message:
+                          areAllSelected ? 'Batal Pilih Semua' : 'Pilih Semua',
+                      child: Checkbox(
+                        visualDensity: VisualDensity.compact,
+                        value: areAllSelected,
+                        onChanged: (bool? value) {
+                          if (value == true) {
+                            _dataSource?.selectAll();
+                          } else {
+                            _dataSource?.clearSelection();
+                          }
+                          setState(() {});
+                        },
+                        activeColor: Colors.teal,
+                      ),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2.0),
+                    child: Text('All',
+                        style: TextStyle(fontSize: 11, color: Colors.black54)),
+                  ),
+                ],
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    hintText: 'Cari Toko, Kota, atau No. PK...',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         Expanded(

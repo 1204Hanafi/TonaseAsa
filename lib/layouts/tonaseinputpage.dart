@@ -4,12 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:tonase_app/models/area_model.dart';
 import 'package:tonase_app/models/customer_model.dart';
+import 'package:tonase_app/models/item_model.dart';
 import 'package:tonase_app/services/area_service.dart';
 import 'package:tonase_app/services/customer_service.dart';
+import 'package:tonase_app/services/item_service.dart';
 import '../models/tonase_model.dart';
 import '../services/tonase_service.dart';
 
-enum JenisTimbang { am, spa }
+enum JenisTimbang { am, spa, item }
 
 class TonaseInputPage extends StatefulWidget {
   final TonaseModel? existingTonase;
@@ -40,8 +42,16 @@ class _TonaseInputPageState extends State<TonaseInputPage> {
   JenisTimbang _selectedTimbang = JenisTimbang.am;
   List<TextEditingController> keteranganControllers = [];
 
+  final TextEditingController _itemCodeController = TextEditingController();
+  final TextEditingController _itemQtyController = TextEditingController();
+
+  final List<Map<String, dynamic>> _addedItems = [];
+  double _totalItemTonase = 0.0;
+
   final AreaService _areaService = AreaService();
   final CustomerService _customerService = CustomerService();
+  final ItemService _itemService = ItemService();
+  final TonaseService _tonaseService = TonaseService();
 
   @override
   void initState() {
@@ -108,6 +118,8 @@ class _TonaseInputPageState extends State<TonaseInputPage> {
     for (final c in keteranganControllers) {
       c.dispose();
     }
+    _itemCodeController.dispose();
+    _itemQtyController.dispose();
     super.dispose();
   }
 
@@ -149,11 +161,20 @@ class _TonaseInputPageState extends State<TonaseInputPage> {
     setState(() {
       noSjController.clear();
       totalKolianController.clear();
-      tonaseControllers.clear();
+      for (final controller in tonaseControllers) {
+        controller.dispose();
+      }
+      for (final controller in keteranganControllers) {
+        controller.dispose();
+      }
+      tonaseControllers = [];
+      keteranganControllers = [];
       jumlahKolian = 0;
-      selectedCustomerRef = null;
-      selectedCustomerData = null;
-      custController.clear();
+
+      _itemCodeController.clear();
+      _itemQtyController.clear();
+      _addedItems.clear();
+      _totalItemTonase = 0.0;
     });
   }
 
@@ -172,88 +193,140 @@ class _TonaseInputPageState extends State<TonaseInputPage> {
     }
   }
 
-  Future<void> handleSubmit() async {
-    if (selectedCustomerRef == null) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Pelanggan Tidak Ditemukan'),
-          content: const Text(
-            'Pelanggan belum dipilih atau tidak ditemukan. Ingin tambah pelanggan baru?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Batal'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context);
-                Navigator.pushNamed(context, '/customer')
-                    .then((_) => fetchCustomers());
-              },
-              style: TextButton.styleFrom(
-                backgroundColor: Colors.teal,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Tambah'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
+  Future<void> _addItemToList() async {
+    final itemCode = _itemCodeController.text.trim().padLeft(6, '0');
+    final quantity = int.tryParse(_itemQtyController.text.trim());
 
-    if (noSjController.text.trim().isEmpty) {
-      _showMessage('No Surat Jalan tidak boleh kosong');
-      return;
-    }
-
-    if (jumlahKolian == 0 || tonaseControllers.any((c) => c.text.isEmpty)) {
-      _showMessage('Isi semua tonase kolian terlebih dahulu');
+    if (itemCode.isEmpty || quantity == null || quantity <= 0) {
+      _showMessage('Kode Item dan Jumlah harus diisi dengan benar.');
       return;
     }
 
     try {
-      final tonaseList =
-          tonaseControllers.map((c) => double.tryParse(c.text) ?? 0.0).toList();
-      final totalTonase = tonaseList.fold(0.0, (total, item) => total + item);
+      final itemDoc = await _itemService.itemCollection.doc(itemCode).get();
+      if (!itemDoc.exists) {
+        _showMessage('Item dengan kode $itemCode tidak ditemukan.');
+        return;
+      }
+
+      final itemData = ItemModel.fromDocument(itemDoc);
+
+      setState(() {
+        _addedItems.add({
+          'itemRef': itemDoc.reference,
+          'itemName': itemData.itemName,
+          'itemUnit': itemData.itemUnit,
+          'quantity': quantity,
+          'totalWeight': quantity * itemData.itemWeight,
+        });
+        _calculateTotalItemTonase();
+        _itemCodeController.clear();
+        _itemQtyController.clear();
+        FocusScope.of(context).requestFocus(FocusNode()); // Tutup keyboard
+      });
+    } catch (e) {
+      _showMessage('Gagal mencari item: $e');
+    }
+  }
+
+  void _calculateTotalItemTonase() {
+    _totalItemTonase = _addedItems.fold(
+        0.0, (total, item) => total + (item['totalWeight'] as double));
+  }
+
+  Future<void> _showItemSearchDialog() async {
+    final selectedItem = await showDialog<ItemModel>(
+      context: context,
+      builder: (context) => const ItemSearchDialog(),
+    );
+    if (selectedItem != null) {
+      _itemCodeController.text = selectedItem.itemId;
+    }
+  }
+
+  Future<void> handleSubmit() async {
+    if (selectedCustomerRef == null) {
+      _showMessage('Pelanggan harus dipilih.');
+      return;
+    }
+    if (noSjController.text.trim().isEmpty) {
+      _showMessage('No. PK tidak boleh kosong.');
+      return;
+    }
+
+    try {
+      dynamic detailTonaseToSave;
+      double finalTotalTonase = 0.0;
+      int finalTotalKoli = 0;
+
+      switch (_selectedTimbang) {
+        case JenisTimbang.am:
+        case JenisTimbang.spa:
+          if (jumlahKolian == 0 ||
+              tonaseControllers.any((c) => c.text.isEmpty)) {
+            _showMessage('Isi semua detail tonase terlebih dahulu.');
+            return;
+          }
+          final tonaseList = tonaseControllers
+              .map((c) => double.tryParse(c.text) ?? 0.0)
+              .toList();
+          finalTotalTonase =
+              tonaseList.fold(0.0, (total, item) => total + item);
+          finalTotalKoli = jumlahKolian;
+
+          if (_selectedTimbang == JenisTimbang.spa) {
+            detailTonaseToSave = [];
+            for (int i = 0; i < jumlahKolian; i++) {
+              detailTonaseToSave.add({
+                'berat': double.tryParse(tonaseControllers[i].text) ?? 0.0,
+                'keterangan': keteranganControllers[i].text,
+              });
+            }
+          } else {
+            detailTonaseToSave = tonaseList;
+          }
+          break;
+
+        case JenisTimbang.item:
+          if (_addedItems.isEmpty) {
+            _showMessage('Tambahkan setidaknya satu item.');
+            return;
+          }
+          finalTotalTonase = _totalItemTonase;
+          finalTotalKoli = _addedItems.length;
+          detailTonaseToSave = _addedItems
+              .map((item) => {
+                    'itemRef': item['itemRef'],
+                    'quantity': item['quantity'],
+                  })
+              .toList();
+          break;
+      }
+
       final tonId = isEditMode
           ? widget.existingTonase!.tonId
-          : await TonaseService().generateTonId(selectedDate);
+          : await _tonaseService.generateTonId(selectedDate);
 
-      List<dynamic> detailTonaseToSave;
-      if (_selectedTimbang == JenisTimbang.spa) {
-        detailTonaseToSave = [];
-        for (int i = 0; i < jumlahKolian; i++) {
-          detailTonaseToSave.add({
-            'berat': double.tryParse(tonaseControllers[i].text) ?? 0.0,
-            'keterangan': keteranganControllers[i].text,
-          });
-        }
+      final tonaseData = {
+        'date': selectedDate,
+        'custId': selectedCustomerRef!,
+        'noSj': noSjController.text,
+        'totalKoli': finalTotalKoli,
+        'detailTonase': detailTonaseToSave,
+        'totalTonase': finalTotalTonase,
+        'isSended': false,
+        'jenisTimbang': _selectedTimbang.name,
+      };
+
+      if (isEditMode) {
+        await _tonaseService.tonaseCollection.doc(tonId).update(tonaseData);
       } else {
-        detailTonaseToSave = tonaseList;
+        await _tonaseService.tonaseCollection.doc(tonId).set(tonaseData);
       }
 
-      final tonase = TonaseModel(
-        tonId: tonId,
-        date: selectedDate,
-        customerRef: selectedCustomerRef!,
-        noSj: noSjController.text,
-        totalKoli: jumlahKolian,
-        detailTonase: detailTonaseToSave,
-        totalTonase: totalTonase,
-      );
-      final service = TonaseService();
-      if (widget.existingTonase != null) {
-        await service.updateTonase(tonId, tonase);
-      } else {
-        await service.addTonase(tonase);
-      }
       if (!mounted) return;
       _showMessage(
-        isEditMode ? 'Data berhasil diperbarui!' : 'Data berhasil disimpan!',
-      );
+          isEditMode ? 'Data berhasil diperbarui!' : 'Data berhasil disimpan!');
       if (!isEditMode) {
         _resetForm();
       } else {
@@ -561,11 +634,16 @@ class _TonaseInputPageState extends State<TonaseInputPage> {
                       value: JenisTimbang.spa,
                       label: Text('SPA'),
                       tooltip: 'Penimbangan Spring'),
+                  ButtonSegment(
+                      value: JenisTimbang.item,
+                      label: Text('ITEM'),
+                      tooltip: 'Penimbangan Per Item Barang'),
                 ],
                 selected: {_selectedTimbang},
                 onSelectionChanged: (Set<JenisTimbang> newSelection) {
                   setState(() {
                     _selectedTimbang = newSelection.first;
+                    _resetForm();
                   });
                 },
                 style: SegmentedButton.styleFrom(
@@ -576,123 +654,302 @@ class _TonaseInputPageState extends State<TonaseInputPage> {
               ),
             ),
             const SizedBox(height: 10),
-            TextField(
-              key: Key('koli-count-field'),
-              controller: totalKolianController,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'Jumlah Kolian',
-                hintText: 'Masukkan Jumlah Kolian',
-                floatingLabelBehavior: FloatingLabelBehavior.always,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10.0),
-                ),
-              ),
-              onChanged: (value) {
-                final int kolian = int.tryParse(value) ?? 0;
-                setState(() {
-                  jumlahKolian = kolian;
-                  if (tonaseControllers.length != kolian) {
-                    for (final controller in tonaseControllers) {
-                      controller.dispose();
-                    }
-                    for (final controller in keteranganControllers) {
-                      controller.dispose();
-                    }
-                    tonaseControllers = List.generate(
-                      kolian,
-                      (_) => TextEditingController(),
-                    );
-                    keteranganControllers = List.generate(
-                      kolian,
-                      (_) => TextEditingController(),
-                    );
-                  }
-                });
-              },
-            ),
-            const SizedBox(height: 20),
-            Text(
-              _selectedTimbang == JenisTimbang.spa
-                  ? 'Tonase Spring / Ikat'
-                  : 'Tonase / Koli',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            ListView.separated(
-              physics: const NeverScrollableScrollPhysics(),
-              shrinkWrap: true,
-              itemCount: jumlahKolian,
-              separatorBuilder: (context, index) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                if (_selectedTimbang == JenisTimbang.spa) {
-                  return Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: tonaseControllers[index],
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            labelText: 'Koli No.${index + 1}',
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10.0)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: keteranganControllers[index],
-                          keyboardType: TextInputType.number,
-                          decoration: InputDecoration(
-                            labelText: 'Qty No.${index + 1} (pcs)',
-                            border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10.0)),
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                } else {
-                  return TextField(
-                    controller: tonaseControllers[index],
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: 'Koli No.${index + 1}',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10.0)),
-                    ),
-                  );
-                }
-              },
-            ),
+            if (_selectedTimbang == JenisTimbang.am ||
+                _selectedTimbang == JenisTimbang.spa)
+              _buildAmSpaInput(),
+            if (_selectedTimbang == JenisTimbang.item) _buildItemInput(),
             const SizedBox(height: 30),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                key: Key('save-tonase-button'),
+                key: const Key('save-tonase-button'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.teal,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                      borderRadius: BorderRadius.circular(12)),
                   elevation: 4,
                 ),
                 onPressed: handleSubmit,
                 child: Text(
                   isEditMode ? 'Update' : 'Simpan',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
+                  style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white),
                 ),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildAmSpaInput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          key: const Key('koli-count-field'),
+          controller: totalKolianController,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText: 'Jumlah Kolian',
+            hintText: 'Masukkan Jumlah Kolian',
+            floatingLabelBehavior: FloatingLabelBehavior.always,
+            border:
+                OutlineInputBorder(borderRadius: BorderRadius.circular(10.0)),
+          ),
+          onChanged: (value) {
+            final int kolian = int.tryParse(value) ?? 0;
+            setState(() {
+              jumlahKolian = kolian;
+              if (tonaseControllers.length != kolian) {
+                for (final c in tonaseControllers) {
+                  c.dispose();
+                }
+                for (final c in keteranganControllers) {
+                  c.dispose();
+                }
+                tonaseControllers =
+                    List.generate(kolian, (_) => TextEditingController());
+                keteranganControllers =
+                    List.generate(kolian, (_) => TextEditingController());
+              }
+            });
+          },
+        ),
+        const SizedBox(height: 20),
+        Text(
+          _selectedTimbang == JenisTimbang.spa
+              ? 'Detail Ikatan Spring'
+              : 'Tonase / Koli',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 12),
+        ListView.separated(
+          physics: const NeverScrollableScrollPhysics(),
+          shrinkWrap: true,
+          itemCount: jumlahKolian,
+          separatorBuilder: (context, index) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            if (_selectedTimbang == JenisTimbang.spa) {
+              return Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: tonaseControllers[index],
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                          labelText: 'Koli No.${index + 1} (kg)',
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10.0))),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: keteranganControllers[index],
+                      keyboardType: TextInputType.number,
+                      decoration: InputDecoration(
+                          labelText: 'Qty No.${index + 1} (pcs)',
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10.0))),
+                    ),
+                  ),
+                ],
+              );
+            } else {
+              return TextField(
+                controller: tonaseControllers[index],
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                    labelText: 'Berat Koli ${index + 1} (kg)',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10.0))),
+              );
+            }
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildItemInput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              flex: 3,
+              child: TextField(
+                controller: _itemCodeController,
+                decoration: InputDecoration(
+                  labelText: 'Kode Item',
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10.0)),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.search),
+                    tooltip: 'Cari Item',
+                    onPressed: _showItemSearchDialog,
+                  ),
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              flex: 2,
+              child: TextField(
+                controller: _itemQtyController,
+                decoration: InputDecoration(
+                    labelText: 'Jumlah',
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10.0))),
+                keyboardType: TextInputType.number,
+              ),
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.add_circle, color: Colors.teal, size: 40),
+              onPressed: _addItemToList,
+              tooltip: 'Tambah Item ke Daftar',
+            ),
+          ],
+        ),
+        const Divider(height: 24),
+        const Text('Daftar Item Ditambahkan',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 8),
+        _addedItems.isEmpty
+            ? const Center(
+                child: Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Text('Belum ada item yang ditambahkan.',
+                        style: TextStyle(color: Colors.grey))))
+            : ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: _addedItems.length,
+                itemBuilder: (context, index) {
+                  final item = _addedItems[index];
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 2),
+                    child: ListTile(
+                      title: Text('${item['itemName']}'),
+                      subtitle: Text(
+                          '${item['quantity']} ${item['itemUnit']} = ${item['totalWeight']} kg'),
+                      trailing: IconButton(
+                        icon:
+                            const Icon(Icons.delete_outline, color: Colors.red),
+                        onPressed: () {
+                          setState(() {
+                            _addedItems.removeAt(index);
+                            _calculateTotalItemTonase();
+                          });
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerRight,
+          child: Text(
+            'Total Tonase Item: ${_totalItemTonase.toStringAsFixed(2)} kg',
+            style: const TextStyle(
+                fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class ItemSearchDialog extends StatefulWidget {
+  const ItemSearchDialog({super.key});
+  @override
+  State<ItemSearchDialog> createState() => _ItemSearchDialogState();
+}
+
+class _ItemSearchDialogState extends State<ItemSearchDialog> {
+  final ItemService _itemService = ItemService();
+  List<ItemModel> _allItems = [];
+  List<ItemModel> _filteredItems = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _itemService.getItems().then((items) {
+      if (mounted) {
+        setState(() {
+          _allItems = items;
+          _filteredItems = items;
+          _isLoading = false;
+        });
+      }
+    });
+  }
+
+  void _filterItems(String query) {
+    final lowerCaseQuery = query.toLowerCase();
+    setState(() {
+      _filteredItems = _allItems.where((item) {
+        return item.itemId.contains(lowerCaseQuery) ||
+            item.itemName.toLowerCase().contains(lowerCaseQuery);
+      }).toList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Cari Item'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              onChanged: _filterItems,
+              decoration: const InputDecoration(
+                hintText: 'Ketik kode atau nama item...',
+                prefixIcon: Icon(Icons.search),
+              ),
+              autofocus: true,
+            ),
+            const SizedBox(height: 16),
+            _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : Expanded(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _filteredItems.length,
+                      itemBuilder: (context, index) {
+                        final item = _filteredItems[index];
+                        return ListTile(
+                          title: Text(item.itemName),
+                          subtitle: Text('ID: ${item.itemId}'),
+                          onTap: () => Navigator.pop(context, item),
+                        );
+                      },
+                    ),
+                  ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Batal'),
+        ),
+      ],
     );
   }
 }

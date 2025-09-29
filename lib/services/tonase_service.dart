@@ -20,25 +20,36 @@ class TonaseService {
   /// Generate ID dengan format MMDD-XXXX berdasarkan tanggal [date]
   Future<String> generateTonId(DateTime date) async {
     String mmdd = DateFormat('MMdd').format(date);
+    int nextNumber = 1; // Default nomor urut jika belum ada data sama sekali
 
-    // Ambil semua dokumen dengan tanggal yang sama
+    // Query untuk mendapatkan DOKUMEN TERAKHIR di hari yang sama
     QuerySnapshot snapshot = await tonaseCollection
         .where(
-          'date',
-          isGreaterThanOrEqualTo: Timestamp.fromDate(
-            DateTime(date.year, date.month, date.day),
-          ),
+          FieldPath.documentId, // Kita akan memfilter berdasarkan ID dokumen
+          isGreaterThanOrEqualTo: '$mmdd-0000',
         )
         .where(
-          'date',
-          isLessThan: Timestamp.fromDate(
-            DateTime(date.year, date.month, date.day + 1),
-          ),
+          FieldPath.documentId,
+          isLessThan: '$mmdd-9999',
         )
+        .orderBy(FieldPath.documentId,
+            descending: true) // Urutkan dari terbesar
+        .limit(1) // Ambil 1 saja (yang paling besar)
         .get();
 
-    int currentCount = snapshot.docs.length;
-    int nextNumber = currentCount + 1;
+    if (snapshot.docs.isNotEmpty) {
+      // Jika ada dokumen, ambil ID terakhir
+      String lastId = snapshot.docs.first.id; // Contoh: '0929-0005'
+
+      // Ambil bagian nomornya saja
+      String lastNumberStr = lastId.split('-').last; // '0005'
+
+      // Konversi ke integer, lalu tambahkan 1
+      int lastNumber = int.parse(lastNumberStr);
+      nextNumber = lastNumber + 1;
+    }
+
+    // Format nomor baru dengan padding 4 digit angka nol
     String formattedNumber = nextNumber.toString().padLeft(4, '0');
 
     return '$mmdd-$formattedNumber';

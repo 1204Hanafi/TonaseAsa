@@ -9,6 +9,7 @@ import 'layouts/homepage.dart';
 import 'layouts/tonaseinputpage.dart';
 import 'layouts/areapage.dart';
 import 'layouts/customerpage.dart';
+import 'layouts/itempage.dart';
 import 'layouts/dailyreportpage.dart';
 import 'layouts/historitonasepage.dart';
 
@@ -40,8 +41,9 @@ class TonaseApp extends StatelessWidget {
         '/input-tonase': (context) => const TonaseInputPage(),
         '/area': (context) => const AreaPage(),
         '/customer': (context) => const CustomerPage(),
+        '/item': (context) => const ItemPage(),
         '/daily': (context) => const DailyReportPage(),
-        '/histori': (context) => HistoriTonasePage(),
+        '/histori': (context) => const HistoriTonasePage(),
       },
     );
   }

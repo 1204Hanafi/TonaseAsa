@@ -198,74 +198,138 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _onViewDetails(TonaseModel item) {
+  void _onViewDetails(TonaseModel item) async {
     const maxPerCol = 10;
-    final List<String> list;
-    if (item.detailTonase.isNotEmpty && item.detailTonase.first is Map) {
-      list = item.detailTonase.asMap().entries.map((e) {
-        final detailMap = e.value as Map;
-        final berat = (detailMap['berat'] as num?)?.toDouble() ?? 0.0;
-        final keterangan = detailMap['keterangan']?.toString() ?? '';
-        return '${e.key + 1}. ${berat.toStringAsFixed(2)} kg [$keterangan pcs]';
-      }).toList();
-    } else {
-      list = item.detailTonase.asMap().entries.map((e) {
-        final berat = (e.value as num?)?.toDouble() ?? 0.0;
-        return '${e.key + 1}. ${berat.toStringAsFixed(2)} kg';
-      }).toList();
+    List<String> list = [];
+    bool isItemMode = false;
+
+    if (item.detailTonase.isNotEmpty &&
+        item.detailTonase.first is Map &&
+        (item.detailTonase.first as Map).containsKey('itemRef')) {
+      isItemMode = true;
     }
-    final cols = (list.length / maxPerCol).ceil();
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Detail Tonase'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildLabelText('Nama Toko:', item.custName),
-              const SizedBox(height: 2),
-              _buildLabelText('Kota:', item.custCity),
-              const SizedBox(height: 2),
-              _buildLabelText('No. PK:', item.noSj),
-              const SizedBox(height: 2),
-              _buildLabelText('Total Tonase:', item.totalTonase.toString()),
-              const SizedBox(height: 8),
-              const Text(
-                'Rincian:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: List.generate(cols, (col) {
-                    final start = col * maxPerCol;
-                    final end = (start + maxPerCol).clamp(0, list.length);
-                    final slice = list.sublist(start, end);
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: slice.map((s) => Text(s)).toList(),
-                      ),
-                    );
-                  }),
+
+    // Tampilkan loading jika ini adalah data item
+    if (isItemMode) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    try {
+      // Logika untuk memproses dan memformat daftar rincian
+      if (isItemMode) {
+        // --- Logika untuk Data Item ---
+        var futures = item.detailTonase.asMap().entries.map((e) async {
+          final detailMap = e.value as Map;
+          final itemRef = detailMap['itemRef'] as DocumentReference?;
+          final quantity = (detailMap['quantity'] as num?)?.toInt() ?? 0;
+
+          if (itemRef == null) {
+            return '${e.key + 1}. Referensi item tidak valid';
+          }
+
+          final itemDoc = await itemRef.get();
+          if (!itemDoc.exists) {
+            return '${e.key + 1}. Item (ID: ${itemRef.id}) tidak ditemukan';
+          }
+
+          final itemData = itemDoc.data() as Map<String, dynamic>;
+          final itemName = itemData['itemName'] ?? 'Nama Tidak Ada';
+          final itemWeight =
+              (itemData['itemWeight'] as num?)?.toDouble() ?? 0.0;
+          final itemUnit = itemData['itemUnit'] ?? 'PCS';
+          final totalWeight = quantity * itemWeight;
+
+          return '${e.key + 1}. $itemName [$quantity $itemUnit] = ${totalWeight.toStringAsFixed(2)} kg';
+        }).toList();
+
+        list = await Future.wait(futures);
+      } else if (item.detailTonase.isNotEmpty &&
+          item.detailTonase.first is Map) {
+        // --- Logika untuk Data SPA ---
+        list = item.detailTonase.asMap().entries.map((e) {
+          final detailMap = e.value as Map;
+          final berat = (detailMap['berat'] as num?)?.toDouble() ?? 0.0;
+          final keterangan = detailMap['keterangan']?.toString() ?? '';
+          return '${e.key + 1}. ${berat.toStringAsFixed(2)} kg ($keterangan pcs)';
+        }).toList();
+      } else {
+        // --- Logika untuk Data AM ---
+        list = item.detailTonase.asMap().entries.map((e) {
+          final berat = (e.value as num?)?.toDouble() ?? 0.0;
+          return '${e.key + 1}. ${berat.toStringAsFixed(2)} kg';
+        }).toList();
+      }
+
+      if (!mounted) return;
+
+      // Tutup dialog loading jika tadi ditampilkan
+      if (isItemMode) {
+        Navigator.pop(context);
+      }
+
+      final cols = (list.length / maxPerCol).ceil();
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Detail Tonase'),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildLabelText('Nama Toko:', item.custName),
+                const SizedBox(height: 2),
+                _buildLabelText('Kota:', item.custCity),
+                const SizedBox(height: 2),
+                _buildLabelText('No. PK:', item.noSj),
+                const SizedBox(height: 2),
+                _buildLabelText('Total Tonase:', item.totalTonase.toString()),
+                const SizedBox(height: 8),
+                const Text(
+                  'Rincian:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
-              ),
-            ],
+                const SizedBox(height: 4),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: List.generate(cols, (col) {
+                      final start = col * maxPerCol;
+                      final end = (start + maxPerCol).clamp(0, list.length);
+                      final slice = list.sublist(start, end);
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: slice.map((s) => Text(s)).toList(),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              key: const Key('close-viewDetails'),
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Tutup'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            key: const Key('close-viewDetails'),
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Tutup'),
-          ),
-        ],
-      ),
-    );
+      );
+    } catch (e) {
+      if (!mounted) return;
+      if (isItemMode) {
+        Navigator.pop(context);
+      }
+      _showError('Gagal memuat detail: $e');
+    }
   }
 
   Widget _buildLabelText(String label, String value) {
@@ -543,7 +607,7 @@ class _HomePageState extends State<HomePage> {
                     final isSelected = _dataSource?.isSelected(item) ?? false;
                     return Card(
                       margin: const EdgeInsets.symmetric(
-                          horizontal: 4, vertical: 4),
+                          horizontal: 2, vertical: 2),
                       color: isSelected ? Colors.teal[300] : null,
                       child: InkWell(
                         onTap: () {
@@ -552,7 +616,7 @@ class _HomePageState extends State<HomePage> {
                         },
                         onLongPress: () => _onViewDetails(item),
                         child: Padding(
-                          padding: const EdgeInsets.all(12.0),
+                          padding: const EdgeInsets.all(8.0),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -583,9 +647,14 @@ class _HomePageState extends State<HomePage> {
                                           text: 'Area: ',
                                           style: TextStyle(
                                               fontWeight: FontWeight.bold)),
+                                      TextSpan(text: '[${item.areaId}] | '),
+                                      const TextSpan(
+                                          text: 'Tgl: ',
+                                          style: TextStyle(
+                                              fontWeight: FontWeight.bold)),
                                       TextSpan(
-                                          text:
-                                              '[${item.areaId}] ${item.areaName}'),
+                                          text: DateFormat('dd MMM yyyy, HH:mm')
+                                              .format(item.date)),
                                     ]),
                               ),
                               RichText(
@@ -598,17 +667,10 @@ class _HomePageState extends State<HomePage> {
                                           text: 'No.PK: ',
                                           style: TextStyle(
                                               fontWeight: FontWeight.bold)),
-                                      TextSpan(text: '${item.noSj} | '),
-                                      const TextSpan(
-                                          text: 'Tgl: ',
-                                          style: TextStyle(
-                                              fontWeight: FontWeight.bold)),
-                                      TextSpan(
-                                          text: DateFormat('dd MMM yyyy, HH:mm')
-                                              .format(item.date)),
+                                      TextSpan(text: '${item.noSj} '),
                                     ]),
                               ),
-                              const Divider(height: 16),
+                              const Divider(height: 4),
                               Row(
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
@@ -852,6 +914,12 @@ class _HomePageState extends State<HomePage> {
             leading: const Icon(Icons.people, color: Colors.green),
             title: const Text('Data Customer'),
             onTap: () => Navigator.pushNamed(context, '/customer'),
+          ),
+          ListTile(
+            key: const Key('item-menu-button'),
+            leading: const Icon(Icons.shopping_cart, color: Colors.black),
+            title: const Text('Data Item'),
+            onTap: () => Navigator.pushNamed(context, '/item'),
           ),
           ListTile(
             key: const Key('rekap-menu-button'),

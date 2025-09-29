@@ -179,21 +179,25 @@ class _DailyReportPageState extends State<DailyReportPage> {
       return true;
     }
 
-    PermissionStatus status = await Permission.storage.status;
+    PermissionStatus status;
+    status = await Permission.storage.request();
 
     if (!status.isGranted) {
-      status = await Permission.storage.request();
+      return true;
+    }
+
+    if (status.isDenied) {
+      status = await Permission.manageExternalStorage.request();
     }
 
     if (status.isGranted) {
       return true;
-    }
-
-    if (status.isPermanentlyDenied) {
+    } else if (status.isPermanentlyDenied) {
       _showMessage(
           'Izin penyimpanan ditolak permanen. Buka pengaturan aplikasi untuk mengizinkan.');
       await openAppSettings();
     }
+
     return false;
   }
 
@@ -247,7 +251,7 @@ class _DailyReportPageState extends State<DailyReportPage> {
           bytes: Uint8List.fromList(fileBytes),
           mimeType: MimeType.microsoftExcel,
         );
-        _showMessage('File Excel berhasil disimpan');
+        _showMessage('File Excel berhasil disimpan di folder Downloads.');
       }
     } catch (e) {
       _showMessage('Gagal mengekspor ke Excel: $e');
@@ -369,7 +373,7 @@ class _DailyReportPageState extends State<DailyReportPage> {
         mimeType: MimeType.pdf,
       );
 
-      _showMessage('File PDF berhasil disimpan');
+      _showMessage('File PDF berhasil disimpan di folder Downloads.');
     } catch (e) {
       _showMessage('Gagal mengekspor ke PDF: $e');
     }
